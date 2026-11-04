@@ -286,7 +286,13 @@ def independent_digit_leak(original, masked_output):
         if sum(chunks) < 9 and not any(c >= 5 for c in chunks):
             continue
 
-        positions = [p for p in range(start, end) if norm_o[p].isdigit()]
+        pos_start = start
+        if len(chunks) > 3 and chunks[0] == 3 and chunks[1] == 4 and chunks[2] == 4:
+            sub_d = digits[:11]
+            if sub_d[:3] in ("010", "011", "016", "017", "018", "019") and len(digits) > 11:
+                _, pos_start = _chunk_ranges(norm_o, start, end, chunks)[3]
+
+        positions = [p for p in range(pos_start, end) if norm_o[p].isdigit()]
         positions = _positions_minus_trailing_keep(norm_o, start, end, chunks, digits, positions)
         if len(positions) <= 4:
             continue
