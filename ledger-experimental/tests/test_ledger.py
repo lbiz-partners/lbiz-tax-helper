@@ -503,10 +503,11 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
         rules = read(RULES)
-        # G2_EXCLUSION_WARNING 고정 문장(법 인용)과 예외 설명은 제외: "20% 이상 누락", "5년 미보관"
-        rules_filtered = re.sub(r"제56조의2 제2항\([^)]+\)", "", rules)
-        rules_filtered = re.sub(r"「20%[^」]*」", "", rules_filtered)
-        rules_filtered = re.sub(r"「5년[^」]*」", "", rules_filtered)
+        # G2_EXCLUSION_WARNING 고정 문장(법 인용)만 제외 - 정확한 문장 사용
+        G2_EXCLUSION_SENTENCE = "제56조의2 제2항(소득금액 20% 이상 누락, 장부·증빙 5년 미보관)이면 공제가 적용되지 않을 수 있어요"
+        rules_filtered = rules.replace(G2_EXCLUSION_SENTENCE, "")
+        # §1-1 예외 설명의 인용 부분도 제외
+        rules_filtered = re.sub(r"「20% 이상 누락」「5년 미보관」", "", rules_filtered)
         for pattern in (r"\d\s*%", r"퍼센트", r"\d[\d,]*\s*(?:만|억|천)", r"만\s*원", r"\d[\d,]*\s*원"):
             self.assertIsNone(re.search(pattern, rules_filtered), pattern)
 
@@ -1755,10 +1756,11 @@ class LedgerTests(unittest.TestCase):
     def test_40_no_hardcoded_legal_numbers_in_rules_and_output(self):
         """규칙 파일과 프로그램 출력에 법 기준 숫자(세율·한도 등)가 박혀 있지 않음."""
         rules = read(RULES)
-        # G2_EXCLUSION_WARNING 고정 문장(법 인용)과 예외 설명은 제외: "20% 이상 누락", "5년 미보관"
-        rules_filtered = re.sub(r"제56조의2 제2항\([^)]+\)", "", rules)
-        rules_filtered = re.sub(r"「20%[^」]*」", "", rules_filtered)
-        rules_filtered = re.sub(r"「5년[^」]*」", "", rules_filtered)
+        # G2_EXCLUSION_WARNING 고정 문장(법 인용)만 제외 - 정확한 문장 사용
+        G2_EXCLUSION_SENTENCE = "제56조의2 제2항(소득금액 20% 이상 누락, 장부·증빙 5년 미보관)이면 공제가 적용되지 않을 수 있어요"
+        rules_filtered = rules.replace(G2_EXCLUSION_SENTENCE, "")
+        # §1-1 예외 설명의 인용 부분도 제외
+        rules_filtered = re.sub(r"「20% 이상 누락」「5년 미보관」", "", rules_filtered)
         for pattern in (r"(?<!\d)\d{1,2}\s*%", r"\d[\d,]*\s*만\s*원", r"\d[\d,]*\s*억\s*원"):
             match = re.search(pattern, rules_filtered)
             self.assertIsNone(match, "규칙 파일에 숫자 패턴 발견: {}".format(pattern))
@@ -1943,14 +1945,18 @@ class LedgerTests(unittest.TestCase):
         src = read(PROG)
         rules = read(RULES)
 
-        # "(예: 0.2)" 같은 도움말 예시에서 실수 세율 패턴 찾기
-        example_rate_pattern = r'\(예[:\s]*0\.\d+\)'
-        for match in re.finditer(example_rate_pattern, src):
+        # 고정 면책 문장은 제외 (이 문장에 "예시" 포함됨)
+        FIXED_DISCLAIMER = "예시·대략적인 금액이며 실제로 하실 때는 세무사와 직접 확인하세요"
+        src_filtered = src.replace(FIXED_DISCLAIMER, "")
+
+        # "예: 0.2" 또는 "(예: 0.2)" 같은 도움말 예시에서 실수 세율 패턴 찾기
+        example_rate_pattern = r'예[:\s]+0\.\d+'
+        for match in re.finditer(example_rate_pattern, src_filtered):
             self.fail("프로그램 도움말에 실수 세율 예시 발견: {}".format(match.group()))
 
-        # "(예: 소득세법 제56조)" 같은 도움말 예시에서 실제 조문번호 찾기 (한 줄 이내)
-        help_article_pattern = r'\(예[:\s][^\n)]{0,30}제\d+조(?:의\d+)?\)'
-        for match in re.finditer(help_article_pattern, src):
+        # "예: 소득세법 제56조" 같은 도움말 예시에서 실제 조문번호 찾기
+        help_article_pattern = r'예[:\s]+[^\n]{0,30}제\d+조(?:의\d+)?'
+        for match in re.finditer(help_article_pattern, src_filtered):
             self.fail("프로그램 도움말에 실제 조문번호 예시 발견: {}".format(match.group()))
 
         rules_example_cmd = re.findall(r'--rate\s+[\d.]+', rules)
@@ -2156,6 +2162,76 @@ class LedgerTests(unittest.TestCase):
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 2)
         self.assertIn("1 이하", stdout)
+
+    def test_58_estimate_rejects_rate_zero_or_twenty(self):
+        """공제율이 0이거나 20(퍼센트로 잘못 입력)이면 거부 (L-15)."""
+        base_args = ["estimate", "--topic", "G2",
+                     "--tax-amount", "1000000", "--business-income", "800000", "--total-income", "1000000",
+                     "--rate-source", "시험용 가짜 법령", "--rate-date", "2026-11-03",
+                     "--limit", "2000000", "--limit-source", "시험용 가짜 법령", "--limit-date", "2026-11-03"]
+
+        # 공제율 0
+        code, stdout, tail = run(*base_args, "--rate", "0")
+        self.assertEqual(code, 2)
+        self.assertIn("0보다 크고", stdout)
+
+        # 공제율 20 (퍼센트로 잘못 입력)
+        code, stdout, tail = run(*base_args, "--rate", "20")
+        self.assertEqual(code, 2)
+        self.assertIn("1 이하", stdout)
+
+    def test_59_lint_catches_additional_illustrative_patterns(self):
+        """L-10: 추가 꾸민 예시 패턴이 lint에서 잡힘."""
+        EXAMPLE_DISCLAIMER = "꾸민 예시·대략적인 금액이며 실제로 하실 때는 세무사와 직접 확인하세요"
+        patterns_to_catch = (
+            "예를 들면 매출 1억원이면",
+            "예컨대 산출세액이 500만원이라면",
+            "가령 사업소득이 2천만원일 때",
+            "만일 공제액이 100만원이라면",
+            "예시: 산출세액 300만원",
+            "예) 공제액 50만원",
+            "시뮬레이션해 보면 약 66만원",
+            "가정해서 말씀드리면 100만원",
+            "가정하면 공제액은 약 30만원",
+            "가상의 사례로 500만원 계산",
+            "김대표 사장님(가상) 매출 1억",
+            "샘플 계산: 1000만원",
+        )
+        for text in patterns_to_catch:
+            code, _, tail = run("lint", "--text", text)
+            self.assertEqual(code, 2, "잡혀야 함: " + text)
+            hit_terms = [h["term"] for h in tail["hits"]]
+            self.assertIn("꾸민 예시에 면책조항 누락", hit_terms, text)
+
+        # 면책조항 붙이면 통과
+        for text in patterns_to_catch:
+            code, _, tail = run("lint", "--text", text + " " + EXAMPLE_DISCLAIMER)
+            self.assertEqual(code, 0, "통과해야 함: " + text)
+
+    def test_60_lint_catches_banned_phrase_synonyms(self):
+        """L-14: 금지어 동의어가 lint에서 잡힘."""
+        banned_phrases = (
+            "홈택스와 같은 금액이에요",
+            "국세청이 계산한 금액입니다",
+            "홈텍스 기준으로 계산하면",
+            "HomeTax 기준 금액",
+            "홈택스 계산과 동일해요",
+        )
+        for text in banned_phrases:
+            code, _, tail = run("lint", "--text", text)
+            self.assertEqual(code, 2, "잡혀야 함: " + text)
+            self.assertTrue(any("관공서 공식 결과로 오해할 표현" in h.get("reason", "") for h in tail["hits"]), text)
+
+        # 고정 고지 문장은 통과해야 함
+        code, _, tail = run("lint", "--text", "홈택스와 다를 수 있어요")
+        self.assertEqual(code, 0, "고정 고지 문장은 통과해야 함")
+
+    def test_61_lint_passes_readme(self):
+        """L-14: README.md를 lint하면 통과해야 함."""
+        import os
+        readme_path = os.path.join(os.path.dirname(PROG), "README.md")
+        code, stdout, tail = run("lint", "--file", readme_path)
+        self.assertEqual(code, 0, "README.md가 lint를 통과해야 함")
 
 
 if __name__ == "__main__":

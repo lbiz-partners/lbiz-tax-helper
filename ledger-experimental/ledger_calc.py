@@ -77,7 +77,8 @@ LINT_TERMS = ("기장 대행", "기장대행", "장부 대행", "장부대행", 
               "세무사 소개", "세무사소개", "장부 대신", "장부대신", "대신 작성", "대신작성")
 OFFICIAL_CALC_TERMS = ("홈택스 기준", "홈택스기준", "국세청 계산", "국세청계산", "정부 계산", "정부계산",
                        "공식 계산", "공식계산", "정확한 세액", "정확한세액", "확정 세액", "확정세액",
-                       "신고용 계산", "신고용계산")
+                       "신고용 계산", "신고용계산", "홈택스와 같은 금액", "국세청이 계산한 금액",
+                       "홈텍스 기준", "HomeTax 기준", "홈택스 계산과 동일")
 LEGAL_TERM = "기장세액공제"
 
 ADVISOR_QUESTIONS = [
@@ -1596,14 +1597,22 @@ def cmd_guard(args):
 
 ILLUSTRATIVE_EXAMPLE_PATTERNS = (
     "가상의 사장님", "가상의 사업장", "가상의 회사", "가상의 매출", "가상의 금액",
-    "○○원", "○○억", "○○만원", "○○천만원", "○억원", "○만원",
-    "예시로", "예시입니다", "예시예요", "꾸민 예시", "가상 사례",
+    "가상의 사례로", "○○원", "○○억", "○○만원", "○○천만원", "○억원", "○만원",
+    "예시로", "예시입니다", "예시예요", "꾸민 예시", "가상 사례", "샘플",
 )
+ILLUSTRATIVE_EXAMPLE_AMOUNT_PATTERN = r"\d[\d,]*\s*(?:원|만원|억원|천만원|백만원|만|억|천)"
 ILLUSTRATIVE_EXAMPLE_PHRASE_PATTERNS = (
-    (r"예를\s*들어", r"\d[\d,]*\s*(?:원|만원|억원|만|억)"),
-    (r"가정해\s*(?:볼게요|보면|봅시다|보겠습니다)", r"\d[\d,]*\s*(?:원|만원|억원|만|억)"),
-    (r"만약\s+.{0,30}(?:이면|이라면|일\s*때)", r"\d[\d,]*\s*(?:원|만원|억원|만|억)"),
-    (r"(?:홍길동|김철수|이영희|박사장|김사장)\s*(?:사장님|씨|님)?\s*\(?\s*가상\s*\)?", None),
+    (r"예를\s*들(?:어|면)", ILLUSTRATIVE_EXAMPLE_AMOUNT_PATTERN),
+    (r"예컨대", ILLUSTRATIVE_EXAMPLE_AMOUNT_PATTERN),
+    (r"가령", ILLUSTRATIVE_EXAMPLE_AMOUNT_PATTERN),
+    (r"만일\s+.{0,30}(?:라면|이라면)", ILLUSTRATIVE_EXAMPLE_AMOUNT_PATTERN),
+    (r"가정해\s*(?:볼게요|보면|봅시다|보겠습니다|서\s*말씀드리면)", ILLUSTRATIVE_EXAMPLE_AMOUNT_PATTERN),
+    (r"가정하면", ILLUSTRATIVE_EXAMPLE_AMOUNT_PATTERN),
+    (r"만약\s+.{0,30}(?:이면|이라면|일\s*때)", ILLUSTRATIVE_EXAMPLE_AMOUNT_PATTERN),
+    (r"시뮬레이션해\s*보면", ILLUSTRATIVE_EXAMPLE_AMOUNT_PATTERN),
+    (r"예시\s*:", ILLUSTRATIVE_EXAMPLE_AMOUNT_PATTERN),
+    (r"예\s*\)", ILLUSTRATIVE_EXAMPLE_AMOUNT_PATTERN),
+    (r"(?:홍길동|김철수|이영희|박사장|김사장|김대표)\s*(?:사장님|씨|님)?\s*\(?\s*가상\s*\)?", None),
 )
 
 
@@ -1681,7 +1690,7 @@ def cmd_list_drafts(args):
 ESTIMABLE_TOPICS = {
     "G2": {
         "name": "기장세액공제",
-        "formula": "min(종합소득 산출세액 × (장부 기준 사업소득금액 ÷ 종합소득금액) × 공제율, 한도)",
+        "formula": "종합소득 산출세액 × (장부 기준 사업소득금액 ÷ 종합소득금액) × 공제율과 한도 중 작은 금액",
         "inputs": ["종합소득 산출세액", "장부 기준 사업소득금액", "종합소득금액", "공제율", "한도"],
         "basis": "소득세법 제56조의2",
     },
