@@ -39,6 +39,7 @@ DISCLAIMER = "참고용 안내이며 세무대리나 세무상담이 아닙니�
 ILLUSTRATIVE_EXAMPLE_DISCLAIMER = "꾸민 예시·대략적인 금액이며 실제로 하실 때는 세무사와 직접 확인하세요"
 LBIZ_CALC_DISCLAIMER = "엘비즈 계산기로 낸 대략적인 금액이며 홈택스와 다를 수 있어요. 실제로 하실 때는 세무사와 직접 확인하세요."
 ELIGIBILITY_PREMISE = "사용자님이 대상이라고 하셨을 때만 계산해요. 대상 여부 판단은 세무사와 확인해 주세요."
+G2_PREREQUISITE = "이 공제는 간편장부대상자가 복식부기로 기장하고, 제70조제4항제3호 서류를 제출할 때 적용돼요."
 BASIS = "현금 기준 단순 합계이며 결산 조정·세액 계산은 하지 않았어요."
 HASH_MISMATCH = "[확인 필요] 계산 프로그램 해시가 달라 합계를 내지 않았어요."
 RRN_MSG = "주민번호가 보여서 옮기지 않았어요. 가려서 다시 보내 주세요"
@@ -1596,7 +1597,13 @@ def cmd_guard(args):
 ILLUSTRATIVE_EXAMPLE_PATTERNS = (
     "가상의 사장님", "가상의 사업장", "가상의 회사", "가상의 매출", "가상의 금액",
     "○○원", "○○억", "○○만원", "○○천만원", "○억원", "○만원",
-    "예시로", "예시입니다", "예시예요", "꾸민 예시",
+    "예시로", "예시입니다", "예시예요", "꾸민 예시", "가상 사례",
+)
+ILLUSTRATIVE_EXAMPLE_PHRASE_PATTERNS = (
+    (r"예를\s*들어", r"\d[\d,]*\s*(?:원|만원|억원|만|억)"),
+    (r"가정해\s*(?:볼게요|보면|봅시다|보겠습니다)", r"\d[\d,]*\s*(?:원|만원|억원|만|억)"),
+    (r"만약\s+.{0,30}(?:이면|이라면|일\s*때)", r"\d[\d,]*\s*(?:원|만원|억원|만|억)"),
+    (r"(?:홍길동|김철수|이영희|박사장|김사장)\s*(?:사장님|씨|님)?\s*\(?\s*가상\s*\)?", None),
 )
 
 
@@ -1604,20 +1611,29 @@ def text_has_illustrative_example(text):
     for pat in ILLUSTRATIVE_EXAMPLE_PATTERNS:
         if pat in text:
             return True
+    for phrase_pat, amount_pat in ILLUSTRATIVE_EXAMPLE_PHRASE_PATTERNS:
+        if re.search(phrase_pat, text):
+            if amount_pat is None or re.search(amount_pat, text):
+                return True
     return False
+
+
+def normalize_whitespace(text):
+    return re.sub(r"[\s\u00a0\u3000]+", " ", text)
 
 
 def lint_hits(text):
     hits = []
+    text_normalized = normalize_whitespace(text)
     for term in LINT_TERMS:
-        n = text.count(term)
+        n = text_normalized.count(term)
         if n:
             hits.append({"term": term, "count": n})
     for term in OFFICIAL_CALC_TERMS:
-        n = text.count(term)
+        n = text_normalized.count(term)
         if n:
             hits.append({"term": term, "count": n, "reason": "관공서 공식 결과로 오해할 표현"})
-    n = text.replace(LEGAL_TERM, "").count("기장")
+    n = text_normalized.replace(LEGAL_TERM, "").count("기장")
     if n:
         hits.append({"term": "기장(기장세액공제 밖)", "count": n})
     if text_has_illustrative_example(text) and ILLUSTRATIVE_EXAMPLE_DISCLAIMER not in text:
@@ -1680,8 +1696,14 @@ def validate_estimate_input(name, value, source_article, check_date):
         return False, "{}의 근거 조문이 없어요.".format(name)
     if check_date is None or check_date.strip() == "":
         return False, "{}의 확인일이 없어요.".format(name)
-    if not re.match(r"^\d{4}-\d{2}-\d{2}$", check_date.strip()):
+    check_date = check_date.strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", check_date):
         return False, "{}의 확인일은 YYYY-MM-DD 꼴이어야 해요.".format(name)
+    try:
+        y, m, d = int(check_date[:4]), int(check_date[5:7]), int(check_date[8:10])
+        datetime.date(y, m, d)
+    except ValueError:
+        return False, "{}의 확인일이 유효한 날짜가 아니에요.".format(name)
     return True, None
 
 
@@ -1754,12 +1776,14 @@ def cmd_estimate(args):
         print("  - 종합소득 산출세액: {:,}원 (사용자님 입력)".format(tax_amount))
         print("  - 장부 기준 사업소득금액: {:,}원 (사용자님 입력)".format(business_income))
         print("  - 종합소득금액: {:,}원 (사용자님 입력)".format(total_income))
-        print("  - 비율 (사업소득금액 ÷ 종합소득금액): {:.4f}".format(ratio))
+        print("  - 비율: {:,} ÷ {:,} = {:.6f} (표시용, 계산은 원래 값으로)".format(business_income, total_income, ratio))
         print("  - 공제율: {} (근거: {}, 확인일: {})".format(rate, rate_source, rate_date))
         print("  - 한도: {:,}원 (근거: {}, 확인일: {})".format(limit, limit_source, limit_date))
-        print("- 계산: min({:,} × {:.4f} × {}, {:,}) = {:,}원".format(
-            tax_amount, ratio, rate, limit, deduction_int))
+        print("- 계산: {:,} × ({:,} ÷ {:,}) × {} = {:,}원 (한도 {:,}원과 비교해 둘 중 작은 금액)".format(
+            tax_amount, business_income, total_income, rate, int(raw_deduction), limit))
+        print("- 결과: {:,}원".format(deduction_int))
         print("")
+        print(G2_PREREQUISITE)
         print(G2_EXCLUSION_WARNING)
         print(ELIGIBILITY_PREMISE)
         print(LBIZ_CALC_DISCLAIMER)
@@ -1781,6 +1805,7 @@ def cmd_estimate(args):
                 "limit_source": limit_source,
                 "limit_date": limit_date,
             },
+            "g2_prerequisite": G2_PREREQUISITE,
             "g2_exclusion_warning": G2_EXCLUSION_WARNING,
             "eligibility_premise": ELIGIBILITY_PREMISE,
             "lbiz_calc_disclaimer": LBIZ_CALC_DISCLAIMER,
