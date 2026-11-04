@@ -1641,6 +1641,23 @@ class LedgerTests(unittest.TestCase):
         self.assertTrue(independent_digit_leak("5123 4567 8901 2346", "5123 4567 8901 2346"))
         self.assertFalse(independent_digit_leak("5123 4567 8901 2346", mask_text("5123 4567 8901 2346")))
 
+    def test_36_round10_qa_recheck_regressions(self):
+        """Round10 QA 재검(N-25·N-27·N-28) + 카드+시각(연도 1900~2100) 회귀."""
+        cases = (
+            ("카드 5123-4567-8901-2024 11:05", "카드 ****-****-****-**** 11:05"),
+            ("카드 5123-4567-8901-1999 12:30", "카드 ****-****-****-**** 12:30"),
+            ("카드 5123 4567 8901 2024 11:05", "카드 **** **** **** **** 11:05"),
+            ("123-45-67890 1234", "***-**-***** 1234"),
+            ("계좌 110-12-34567-89", "계좌 ***-**-***67-89"),
+            ("3,764 / 17-47728-5434", "*,*** / **-*****-5434"),
+        )
+        for raw, expected in cases:
+            masked = mask_text(raw)
+            self.assertEqual(masked, expected, raw)
+            self.assertFalse(independent_digit_leak(raw, masked), raw)
+        partial = "카드 ****-****-8901-2024 11:05"
+        self.assertTrue(independent_digit_leak("카드 5123-4567-8901-2024 11:05", partial))
+
     def test_35_strict_fuzz_six_checker_false_positives(self):
         """strict fuzz 잔여 건: 가림 정상·검사기만 run 구간/날짜 꼬리 분리로 오탐 제거."""
         cases = (

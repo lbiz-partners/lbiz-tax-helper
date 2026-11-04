@@ -332,11 +332,14 @@ def iter_connected_digit_sequences(text):
             d0 = pos
             while pos < n and text[pos].isdigit():
                 pos += 1
+            letter_before = d0 > 0 and is_text_letter(text[d0 - 1])
             chunks.append(pos - d0)
             if pos >= n:
                 break
             nxt = consume_separator_run(text, pos, n)
             if nxt is None:
+                break
+            if letter_before:
                 break
             pos = nxt
             if pos >= n or not text[pos].isdigit():
@@ -649,24 +652,194 @@ def finalize_keep_chunks(n, chunks, props, text, start, end, digits):
     return keep
 
 
-def iter_mask_spans_in_run(text, start, end, chunks, digits):
+def run_is_date_plus_short_plain_amount(text, start, end, chunks, digits):
+    """날짜 뒤 쉼표 없는 짧은 금액(번호 꼴·9자리 이상 덩어리 제외)만 있을 때 run 전체 유지."""
     n = len(chunks)
-    props = proposed_exception_ranges(text, start, end, chunks, digits)
-    keep = finalize_keep_chunks(n, chunks, props, text, start, end, digits)
+    if n < 4 or not is_date_digit_sequence(chunks[:3], digits[:8]):
+        return False
+    rest = chunks[3:]
+    rest_d = digits[8:]
+    if is_card_four_chunk_pattern(chunks, 3):
+        return False
+    if len(rest) >= 4 and all(c == 4 for c in rest[:4]):
+        return False
+    if tuple(rest) in SENSITIVE_CHUNK_PATTERNS:
+        return False
+    if len(rest) == 1 and len(rest_d) >= 10:
+        return False
+    if len(rest) == 1 and rest[0] >= 5:
+        last_c0, last_c1 = chunk_char_range(text, start, end, chunks, n - 1)
+        if has_unit_suffix_immediately(text, last_c1, len(text)):
+            return True
+        return False
+    if len(rest) >= 2 and sum(rest) >= 9:
+        return False
+    if len(rest) >= 2 and any(c >= 5 for c in rest):
+        return False
+    return True
+
+
+def run_is_only_comma_amount(text, start, end, chunks, digits):
+    """connected run 전체가 쉼표 금액 하나뿐일 때."""
+    n = len(chunks)
+    if n < 2:
+        return False
+    c0, _ = chunk_char_range(text, start, end, chunks, 0)
+    ce = try_comma_amount_end(text, c0, end)
+    if ce is None:
+        return False
+    if c0 > start and text[c0 - 1].isdigit():
+        return False
+    if ce < end and text[ce].isdigit():
+        return False
+    sep_runs = sequence_separator_runs(text, start, end, chunks)
+    if is_account_comma_digit_pattern(chunks, sep_runs):
+        return False
+    last_idx = chunk_index_at_char(text, start, end, chunks, ce - 1)
+    return last_idx >= n - 1
+
+
+def run_is_only_dates(chunks, digits):
+    """run 안이 합법 날짜(4-2-2 또는 8자리)만 반복일 때."""
+    n = len(chunks)
     i = 0
     while i < n:
-        if keep[i]:
-            i += 1
+        if i + 3 <= n and is_date_digit_sequence(chunks[i:i + 3], digit_substring(chunks, digits, i, i + 3)):
+            i += 3
             continue
-        j = i
-        while j < n and not keep[j]:
-            j += 1
-        lo, hi = i, j - 1
-        if non_keep_group_needs_mask(chunks, lo, hi):
-            s0, _ = chunk_char_range(text, start, end, chunks, lo)
-            _, s1 = chunk_char_range(text, start, end, chunks, hi)
+        if i < n and chunks[i] == 8:
+            sub_d = digit_substring(chunks, digits, i, i + 1)
+            if len(sub_d) == 8:
+                try:
+                    y = int(sub_d[0:4])
+                    if 1900 <= y <= 2100:
+                        datetime.date(y, int(sub_d[4:6]), int(sub_d[6:8]))
+                        i += 1
+                        continue
+                except ValueError:
+                    pass
+        return False
+    return i == n and n > 0
+
+
+def run_is_phone_entire_run(chunks, digits, n):
+    if n == 3 and chunks[0] == 3 and chunks[1] == 4 and chunks[2] == 4:
+        return PHONE_LIKE_RE.match(digits)
+    if n == 3 and chunks[1] == 4 and chunks[2] == 4 and chunks[0] in (2, 3):
+        return len(digits) >= 2 and digits[:2] in PHONE_AREA2 and PHONE_LIKE_RE.match(digits)
+    if n == 2 and chunks[0] == 3 and chunks[1] == 4:
+        return PHONE_LIKE_RE.match(digits[:7])
+    return False
+
+
+def run_is_two_comma_amounts(text, start, end, chunks, digits):
+    """쉼표 금액 ~ 쉼표 금액 처럼 금액 두 덩어리만 있는 run."""
+    c0, _ = chunk_char_range(text, start, end, chunks, 0)
+    ce1 = try_comma_amount_end(text, c0, end)
+    if ce1 is None:
+        return False
+    pos = ce1
+    while pos < end and not text[pos].isdigit():
+        ch = text[pos]
+        if ch in ", \u00a0":
+            pos += 1
+            continue
+        if is_text_separator(ch) or ch in "~\u2013\u2014\u2212\u2010\u2011\u2012\u2015\uff0d":
+            pos += 1
+            continue
+        return False
+    if pos >= end:
+        return False
+    ce2 = try_comma_amount_end(text, pos, end)
+    if ce2 is None or ce2 < end:
+        return False
+    if pos > c0 and text[pos - 1].isdigit():
+        return False
+    return True
+
+
+def run_is_standalone_keep(text, start, end, chunks, digits):
+    """이웃 숫자 run 과 합쳐진 connected run 이 아니면, 예외 패턴 하나만일 때만 유지."""
+    n = len(chunks)
+    total = len(digits)
+    text_end = len(text)
+
+    if n == 2 and total == 4 and is_clock_or_ratio_sequence(chunks, digits):
+        return True
+    if n == 3 and total == 6 and is_clock_or_ratio_sequence(chunks, digits):
+        return True
+
+    if n == 1:
+        c0, c1 = chunk_char_range(text, start, end, chunks, 0)
+        if has_unit_suffix_immediately(text, c1, text_end):
+            return True
+        if chunks[0] == 8 and total == 8:
+            try:
+                y = int(digits[0:4])
+                if 1900 <= y <= 2100:
+                    datetime.date(y, int(digits[4:6]), int(digits[6:8]))
+                    return True
+            except ValueError:
+                pass
+
+    if n == 3 and total == 8 and is_date_digit_sequence(chunks, digits):
+        return True
+
+    if n == 3 and is_business_digit_sequence(chunks) and total == 10:
+        return True
+
+    if run_is_phone_entire_run(chunks, digits, n):
+        return True
+
+    if run_is_only_comma_amount(text, start, end, chunks, digits):
+        return True
+
+    if run_is_two_comma_amounts(text, start, end, chunks, digits):
+        return True
+
+    if run_is_date_plus_short_plain_amount(text, start, end, chunks, digits):
+        return True
+
+    if run_is_only_dates(chunks, digits):
+        return True
+
+    if run_is_small_counter_sequence(chunks, digits):
+        return True
+
+    return False
+
+
+def run_is_small_counter_sequence(chunks, digits):
+    """줄 번호·개수처럼 1~2자리 숫자만 이어진 run (장부 예외)."""
+    if not chunks or sum(chunks) >= 9:
+        return False
+    return all(c <= 2 for c in chunks)
+
+
+def iter_mask_spans_in_run(text, start, end, chunks, digits):
+    """9자리 이상(또는 5자리 덩어리) connected run 은 기본 가림, 단독 예외 run 만 유지."""
+    n = len(chunks)
+    if run_is_standalone_keep(text, start, end, chunks, digits):
+        return
+    needs = any(c >= 5 for c in chunks) or len(digits) >= 9
+    if not needs:
+        return
+    if n >= 7 and is_date_digit_sequence(chunks[n - 3:n], digits[-8:]):
+        body_n = n - 3
+        if body_n >= 1 and (any(chunks[i] >= 5 for i in range(body_n)) or sum(chunks[:body_n]) >= 9):
+            s0, _ = chunk_char_range(text, start, end, chunks, 0)
+            _, s1 = chunk_char_range(text, start, end, chunks, body_n - 1)
             yield s0, s1
-        i = j
+            return
+    if n >= 4 and is_date_digit_sequence(chunks[:3], digits[:8]):
+        if not run_is_date_plus_short_plain_amount(text, start, end, chunks, digits):
+            s0, _ = chunk_char_range(text, start, end, chunks, 3)
+            _, s1 = chunk_char_range(text, start, end, chunks, n - 1)
+            yield s0, s1
+            return
+    s0, _ = chunk_char_range(text, start, end, chunks, 0)
+    _, s1 = chunk_char_range(text, start, end, chunks, n - 1)
+    yield s0, s1
 
 
 def connected_run_contains_rrn(chunks, digits):
