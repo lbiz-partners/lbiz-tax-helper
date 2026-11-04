@@ -448,7 +448,7 @@ class LedgerTests(unittest.TestCase):
             code, stdout, tail = run("guard", "--text", text)
             self.assertEqual(code, 0)
             self.assertEqual(tail["category"], "personal")
-            self.assertIn("일반 정보 한 줄과 세무사 질문 목록만 드릴게요", tail["answer"])
+            self.assertIn("대상 여부 판단은 하지 않아요", tail["answer"])
             self.assertTrue(tail["general_info"])
             self.assertGreaterEqual(len(tail["questions"]), 3)
             self.assertEqual(set(tail), {"category", "answer", "related_topic", "general_info", "questions",
@@ -1739,7 +1739,7 @@ class LedgerTests(unittest.TestCase):
             code, stdout, tail = run("guard", "--text", text)
             self.assertEqual(code, 0, text)
             self.assertEqual(tail["category"], "personal", text)
-            self.assertIn("계산·판단은 하지 않아요", tail["answer"], text)
+            self.assertIn("대상 여부 판단은 하지 않아요", tail["answer"], text)
 
     def test_40_no_hardcoded_legal_numbers_in_rules_and_output(self):
         """규칙 파일과 프로그램 출력에 법 기준 숫자(세율·한도 등)가 박혀 있지 않음."""
@@ -1797,29 +1797,29 @@ class LedgerTests(unittest.TestCase):
         """estimate 명령은 값·근거 조문·확인일이 모두 있어야 계산함."""
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "1000000",
-                                 "--rate", "0.2",
-                                 "--limit", "1000000")
+                                 "--rate", "0.5",
+                                 "--limit", "2000000")
         self.assertEqual(code, 2)
         self.assertEqual(tail["status"], "missing_source")
         self.assertIn("[확인 필요]", stdout)
 
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "1000000",
-                                 "--rate", "0.2",
-                                 "--rate-source", "소득세법 제56조의2",
-                                 "--limit", "1000000",
-                                 "--limit-source", "소득세법 제56조의2",
+                                 "--rate", "0.5",
+                                 "--rate-source", "시험용 가짜 조문",
+                                 "--limit", "2000000",
+                                 "--limit-source", "시험용 가짜 조문",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 2)
         self.assertEqual(tail["status"], "missing_source")
 
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "1000000",
-                                 "--rate", "0.2",
-                                 "--rate-source", "소득세법 제56조의2",
+                                 "--rate", "0.5",
+                                 "--rate-source", "시험용 가짜 조문",
                                  "--rate-date", "2026-11-03",
-                                 "--limit", "1000000",
-                                 "--limit-source", "소득세법 제56조의2",
+                                 "--limit", "2000000",
+                                 "--limit-source", "시험용 가짜 조문",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0, stdout)
         self.assertEqual(tail["status"], "ok")
@@ -1831,11 +1831,11 @@ class LedgerTests(unittest.TestCase):
 
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "1000000",
-                                 "--rate", "0.2",
-                                 "--rate-source", "소득세법 제56조의2",
+                                 "--rate", "0.5",
+                                 "--rate-source", "시험용 가짜 조문",
                                  "--rate-date", "2026-11-03",
-                                 "--limit", "1000000",
-                                 "--limit-source", "소득세법 제56조의2",
+                                 "--limit", "2000000",
+                                 "--limit-source", "시험용 가짜 조문",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0)
         self.assertIn(LBIZ_DISCLAIMER, stdout)
@@ -1847,25 +1847,25 @@ class LedgerTests(unittest.TestCase):
         """estimate G2 계산이 공식대로 수행됨."""
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "500000",
-                                 "--rate", "0.2",
-                                 "--rate-source", "소득세법 제56조의2",
+                                 "--rate", "0.5",
+                                 "--rate-source", "시험용 가짜 조문",
                                  "--rate-date", "2026-11-03",
-                                 "--limit", "1000000",
-                                 "--limit-source", "소득세법 제56조의2",
+                                 "--limit", "3000000",
+                                 "--limit-source", "시험용 가짜 조문",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0)
-        self.assertEqual(tail["result"], 100000)
+        self.assertEqual(tail["result"], 250000)
 
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "10000000",
-                                 "--rate", "0.2",
-                                 "--rate-source", "소득세법 제56조의2",
+                                 "--rate", "0.5",
+                                 "--rate-source", "시험용 가짜 조문",
                                  "--rate-date", "2026-11-03",
-                                 "--limit", "1000000",
-                                 "--limit-source", "소득세법 제56조의2",
+                                 "--limit", "2000000",
+                                 "--limit-source", "시험용 가짜 조문",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0)
-        self.assertEqual(tail["result"], 1000000)
+        self.assertEqual(tail["result"], 2000000)
 
     def test_45_official_calc_terms_banned(self):
         """관공서 공식 결과로 오해할 표현은 lint에서 차단됨."""
@@ -1896,31 +1896,38 @@ class LedgerTests(unittest.TestCase):
         """estimate는 공식이 준비된 주제만 계산함."""
         code, stdout, tail = run("estimate", "--topic", "G1",
                                  "--tax-amount", "1000000",
-                                 "--rate", "0.2",
-                                 "--rate-source", "테스트",
+                                 "--rate", "0.5",
+                                 "--rate-source", "시험용 가짜 조문",
                                  "--rate-date", "2026-11-03",
-                                 "--limit", "1000000",
-                                 "--limit-source", "테스트",
+                                 "--limit", "2000000",
+                                 "--limit-source", "시험용 가짜 조문",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 2)
         self.assertEqual(tail["status"], "not_estimable")
         self.assertIn("G2", tail["available"])
 
     def test_47_no_hardcoded_rates_in_program(self):
-        """프로그램에 세율·한도 숫자가 박혀 있지 않음."""
+        """프로그램·규칙 파일의 도움말·예시에 실제 법 숫자가 박혀 있지 않음."""
         src = read(PROG)
-        tax_patterns = (
-            r'rate\s*=\s*0\.\d+',
-            r'limit\s*=\s*\d{5,}',
-            r'공제율\s*=\s*0\.\d+',
-            r'한도\s*=\s*\d{5,}',
-        )
-        for pattern in tax_patterns:
-            for match in re.finditer(pattern, src, re.IGNORECASE):
-                context = src[max(0, match.start()-50):match.end()+50]
-                if "args." in context or "test" in context.lower() or "example" in context.lower():
-                    continue
-                self.fail("프로그램에 하드코딩된 세율/한도 발견: {}".format(match.group()))
+        rules = read(RULES)
+
+        example_rate_pattern = r'(?:예|예:|예\s*:|\(예:|\(예\s*:)\s*0\.\d+'
+        for match in re.finditer(example_rate_pattern, src):
+            self.fail("프로그램 도움말에 실수 세율 예시 발견: {}".format(match.group()))
+
+        help_article_pattern = r'(?:예|예:|예\s*:|\(예:|\(예\s*:)[^)]*제\d+조(?:의\d+)?'
+        for match in re.finditer(help_article_pattern, src):
+            self.fail("프로그램 도움말에 실제 조문번호 예시 발견: {}".format(match.group()))
+
+        rules_example_cmd = re.findall(r'--rate\s+[\d.]+', rules)
+        for match in rules_example_cmd:
+            if re.search(r'0\.\d+', match):
+                self.fail("규칙 파일 명령 예시에 실수 세율 발견: {}".format(match))
+
+        rules_example_article = re.findall(r'--rate-source\s+"[^"]+"', rules)
+        for match in rules_example_article:
+            if re.search(r'제\d+조', match):
+                self.fail("규칙 파일 명령 예시에 실제 조문번호 발견: {}".format(match))
 
 
 if __name__ == "__main__":

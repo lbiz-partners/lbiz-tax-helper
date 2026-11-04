@@ -33,7 +33,7 @@ CHECK_ORG = "법제처 국가법령정보센터"
 
 REFUSAL = "이 도우미는 사용자님 본인 사업장 자료만 정리해요. 다른 회사 장부는 세무사에게 맡겨 주세요."
 FILING_ANSWER = "신고는 세무사와 상의해 주세요."
-PERSONAL_ANSWER = "사용자님 숫자나 상황을 넣은 계산·판단은 하지 않아요. 일반 정보 한 줄과 세무사 질문 목록만 드릴게요."
+PERSONAL_ANSWER = "대상 여부 판단은 하지 않아요. 대상이라고 하시고 법제처 출처 있는 값을 주시면 대략적인 금액은 계산해 드릴게요."
 CONFIRM_WITH_ADVISOR = "사용자님 경우에 맞는지는 세무사와 확인해 주세요."
 DISCLAIMER = "참고용 안내이며 세무대리나 세무상담이 아닙니다. 최종 판단은 직접 하시고, 중요한 건 세무사와 상의해 주세요."
 ILLUSTRATIVE_EXAMPLE_DISCLAIMER = "꾸민 예시·대략적인 금액이며 실제로 하실 때는 세무사와 직접 확인하세요"
@@ -1723,7 +1723,7 @@ def cmd_estimate(args):
             return finish("missing_source", 2, {"errors": errors})
 
         if rate <= 0 or rate > 1:
-            print("입력 오류: 공제율은 0보다 크고 1 이하(예: 0.2)여야 해요.")
+            print("입력 오류: 공제율은 0보다 크고 1 이하여야 해요.")
             return finish("input_error", 2)
 
         if limit < 0:
@@ -1802,8 +1802,8 @@ def build_parser():
     p = sub.add_parser("estimate", help="법제처 확인 값으로 대략적인 금액 계산 (대상이라고 하셨을 때만)")
     p.add_argument("--topic", required=True, help="주제 번호(예: G2)")
     p.add_argument("--tax-amount", type=int, help="[G2] 산출세액 (원)")
-    p.add_argument("--rate", type=float, help="[G2] 공제율 (예: 0.2)")
-    p.add_argument("--rate-source", help="[G2] 공제율 근거 조문 (예: 소득세법 제56조의2)")
+    p.add_argument("--rate", type=float, help="[G2] 공제율 (법제처 원문에서 확인한 값)")
+    p.add_argument("--rate-source", help="[G2] 공제율 근거 조문 (법제처 원문 조문명)")
     p.add_argument("--rate-date", help="[G2] 공제율 확인일 (YYYY-MM-DD)")
     p.add_argument("--limit", type=int, help="[G2] 한도 (원)")
     p.add_argument("--limit-source", help="[G2] 한도 근거 조문")
