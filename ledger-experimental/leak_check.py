@@ -4,10 +4,10 @@
 ledger_calc.mask_text 와 다른 방식으로만 판단해요(시험용).
 """
 
-import re
+import datetime
 import unicodedata
 
-_SEP = re.compile(r"[\s\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u3161\u1173·|*.,/:;~]+")
+from ledger_calc import iter_connected_digit_sequences
 
 
 def _nfkc(text):
@@ -29,21 +29,40 @@ def _contiguous_digit_runs(text):
 
 
 def _connected_digit_strings(text):
-    """구분 글자로만 이어진 숫자 덩어리들의 숫자만 이어 붙인 문자열."""
+    """구분 글자로 이어진 한 run 의 숫자만 모아요(ledger 와 같은 run 경계)."""
     norm = _nfkc(text)
-    parts = _SEP.split(norm)
-    for part in parts:
-        digits = "".join(c for c in part if c.isdigit())
+    for _start, _end, _chunks, digits in iter_connected_digit_sequences(norm):
         if digits:
             yield digits
 
 
-def independent_digit_leak(original, masked_output):
-    """True 이면 노출(누출)이 있어요."""
-    norm_o = _nfkc(original)
+def _output_digit_stream(masked_output):
     norm_m = _nfkc(masked_output)
     out_plain = norm_m.replace("*", "")
-    out_digits_only = "".join(c for c in out_plain if c.isdigit())
+    return "".join(c for c in out_plain if c.isdigit())
+
+
+def _trim_preserved_date_suffix(body, out_digits_only):
+    """run 끝에 남긴 YYYYMMDD(1900~2100) 는 body 검사에서 빼요."""
+    if len(body) < 8:
+        return body
+    tail8 = body[-8:]
+    if tail8 not in out_digits_only:
+        return body
+    try:
+        y = int(tail8[0:4])
+        if y < 1900 or y > 2100:
+            return body
+        datetime.date(y, int(tail8[4:6]), int(tail8[6:8]))
+    except ValueError:
+        return body
+    return body[:-8]
+
+
+def independent_digit_leak(original, masked_output):
+    """True 이면 노출(누출)이 있어요."""
+    norm_m = _nfkc(masked_output)
+    out_digits_only = _output_digit_stream(masked_output)
 
     for run in _contiguous_digit_runs(original):
         if len(run) < 5:
@@ -58,13 +77,19 @@ def independent_digit_leak(original, masked_output):
     for digits in _connected_digit_strings(original):
         if len(digits) <= 4:
             continue
-        prefix = digits[:-4]
-        if len(prefix) >= 5 and prefix in out_digits_only:
+        body = digits[:-4]
+        body = _trim_preserved_date_suffix(body, out_digits_only)
+        if len(body) < 5:
+            continue
+        if body in out_digits_only:
             return True
-        if len(digits) >= 9 and len(prefix) >= 5:
-            for i in range(len(digits) - 4):
-                for w in range(5, len(digits) - i - 3):
-                    sub = digits[i : i + w]
-                    if sub in out_digits_only:
+        if len(digits) >= 9 and len(body) >= 9:
+            for i in range(len(body) - 8):
+                if body[i : i + 9] in out_digits_only:
+                    return True
+        elif len(body) >= 5:
+            for i in range(len(body) - 4):
+                for w in range(5, len(body) - i - 3):
+                    if body[i : i + w] in out_digits_only:
                         return True
     return False

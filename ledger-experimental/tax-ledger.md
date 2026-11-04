@@ -164,4 +164,4 @@ python3 -m unittest -v tests.test_ledger
 
 ## 7. 기준 해시
 
-`ledger_calc.py` sha256: `36c8b04c66753d7d4e902656307caa3dbbd118d03dcda8b6ed73ec9d9359ce67`
+`ledger_calc.py` sha256: `48d704a64d8ee7cb28c6ea2a1ca79b3d77ce4b84b057a24edcc959df14be45c6`

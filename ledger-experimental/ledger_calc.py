@@ -81,7 +81,7 @@ ADVISOR_QUESTIONS = [
     "증빙이 없는 거래는 어떻게 처리하면 되나요?",
 ]
 
-# 일반 절세 정보: 총괄이 준 조문 표만 써요. 세율·한도·금액·기한 숫자는 넣지 않아요.
+# 일반 절세 정보: 설계 문서의 조문 표만 써요. 세율·한도·금액·기한 숫자는 넣지 않아요.
 # links 항목: (법령 이름, 조번호, 가지번호)
 TOPICS = {
     "G1": {
@@ -306,7 +306,10 @@ def is_complete_date_prefix(chunks, digits):
         return False
     head = digits[:8]
     try:
-        datetime.date(int(head[0:4]), int(head[4:6]), int(head[6:8]))
+        y = int(head[0:4])
+        if y < 1900 or y > 2100:
+            return False
+        datetime.date(y, int(head[4:6]), int(head[6:8]))
     except ValueError:
         return False
     return True
@@ -377,7 +380,10 @@ def is_date_digit_sequence(chunks, digits):
     if chunks[1] not in (1, 2) or chunks[2] not in (1, 2):
         return False
     try:
-        datetime.date(int(digits[0:4]), int(digits[4:6]), int(digits[6:8]))
+        y = int(digits[0:4])
+        if y < 1900 or y > 2100:
+            return False
+        datetime.date(y, int(digits[4:6]), int(digits[6:8]))
         return True
     except ValueError:
         return False
@@ -507,8 +513,11 @@ def strict_exception_char_end(text, start, end, chunks, digits, idx):
         return None
     sub_c = chunks[idx:]
     sub_d = digit_substring(chunks, digits, idx, n)
-    if idx + 1 < n and is_clock_or_ratio_sequence(chunks[idx:idx + 2], digit_substring(chunks, digits, idx, idx + 2)):
-        _, e = chunk_char_range(text, start, end, chunks, idx + 1)
+    if n == 2 and idx == 0 and is_clock_or_ratio_sequence(chunks, digits):
+        _, e = chunk_char_range(text, start, end, chunks, 1)
+        return e
+    if n == 3 and idx == 0 and is_clock_or_ratio_sequence(chunks, digits):
+        _, e = chunk_char_range(text, start, end, chunks, 2)
         return e
     if sub_c[0] == 8 and len(sub_d) >= 8 and idx == 0:
         if idx + 1 < n and chunks[idx + 1] >= 4:
@@ -532,15 +541,15 @@ def strict_exception_char_end(text, start, end, chunks, digits, idx):
         return e
     if idx + 3 <= n and chunks[idx] == 3 and chunks[idx + 1] == 4 and chunks[idx + 2] == 4:
         sub_d3 = digit_substring(chunks, digits, idx, idx + 3)
-        if PHONE_LIKE_RE.match(sub_d3):
+        if PHONE_LIKE_RE.match(sub_d3) and idx + 3 >= n:
             _, e = chunk_char_range(text, start, end, chunks, idx + 2)
             return e
     if idx + 2 < n and chunks[idx + 1] == 4 and chunks[idx + 2] == 4 and chunks[idx] in (2, 3):
         sub_d3 = digit_substring(chunks, digits, idx, idx + 3)
-        if len(sub_d3) >= 2 and sub_d3[:2] in PHONE_AREA2 and PHONE_LIKE_RE.match(sub_d3):
+        if len(sub_d3) >= 2 and sub_d3[:2] in PHONE_AREA2 and PHONE_LIKE_RE.match(sub_d3) and idx + 3 >= n:
             _, e = chunk_char_range(text, start, end, chunks, idx + 2)
             return e
-    if idx + 2 < n and sub_c[0] == 3 and sub_c[1] == 4 and PHONE_LIKE_RE.match(sub_d[:7]):
+    if idx + 2 < n and sub_c[0] == 3 and sub_c[1] == 4 and PHONE_LIKE_RE.match(sub_d[:7]) and idx + 2 >= n:
         _, e = chunk_char_range(text, start, end, chunks, idx + 1)
         return e
     c0, c1 = chunk_char_range(text, start, end, chunks, idx)

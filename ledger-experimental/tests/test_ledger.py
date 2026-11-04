@@ -837,7 +837,7 @@ class LedgerTests(unittest.TestCase):
             "2026-10-02",
             "010-1234-5678",
             "123-45-67890",
-            mask_text("2026-10-02 1500000"),
+            "2026-10-02 ****0000",
         )
         pii = os.path.join(self.tmp, "r4_23.csv")
         with open(pii, "w", encoding="utf-8", newline="") as f:
@@ -935,7 +935,7 @@ class LedgerTests(unittest.TestCase):
             "1588-1234",
             "123-45-67890",
             "123" + "\u3161" + "45" + "\u3161" + "67890",
-            mask_text("2026-10-02 1500000"),
+            "2026-10-02 ****0000",
             "2026-11-03 5000원",
             "점심 2026-11-03 15000원",
             "10월" + sep_run() + "11월",
@@ -1073,7 +1073,7 @@ class LedgerTests(unittest.TestCase):
         self.assertGreaterEqual(len(acct_cases), 10)
 
 
-    def test_25_codex_r4b_regressions(self):
+    def test_25_r4b_regressions(self):
         en = "\u2013"
         eu = "\u3161"
         ff = "\uff0d"
@@ -1404,8 +1404,8 @@ class LedgerTests(unittest.TestCase):
                 self.assertFalse(independent_digit_leak(text, row_blob), text)
 
         bad_out = "5123 4567 8901 2346"
+        self.assertTrue(independent_digit_leak(bad_out, bad_out))
         self.assertFalse(independent_digit_leak(bad_out, mask_text(bad_out)))
-        self.assertIn("5123", bad_out)
 
         for seed in (20261104, 20261105):
             run_seed(seed, 100)
@@ -1604,6 +1604,42 @@ class LedgerTests(unittest.TestCase):
         self.assertGreater(count_r8(20261104), 0)
         self.assertGreater(count_r8(20261105), 0)
         self.assertTrue(independent_digit_leak("2026-11-03 15000", r8.mask_text("2026-11-03 15000")))
+
+    def test_34_qa_pr1_high_medium_regressions(self):
+        """QA PR#1 (N-17~N-20) 고정 입력: 수정 전 head·8차에서 깨지는 케이스."""
+        import importlib.util
+
+        r8_path = os.path.join(ROOT, "reference", "ledger_calc_r8.py")
+        spec = importlib.util.spec_from_file_location("ledger_calc_r8", r8_path)
+        r8 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(r8)
+
+        cases = (
+            ("카드 5123-4567-8901-2346 11:05", "카드 ****-****-****-**** 11:05"),
+            ("5123-4567-8901-2346 11:05:09", "****-****-****-**** **:05:09"),
+            ("5123-4567-8901-2346 12:30~13:30", "****-****-****-**** **:**~13:30"),
+            ("045 5123 4567 8901 2346", "*** **** **** **** 2346"),
+            ("7953-49-18-53", "****-**-18-53"),
+        )
+        pre_fix = (
+            "카드 ****-****-8901-2346 11:05",
+            "****-****-8901-2346 11:05:09",
+            "****-****-8901-2346 12:30~13:30",
+            "045 5123 4567 8901 2346",
+            "7953-49-18-53",
+        )
+        for (raw, expected), bad in zip(cases, pre_fix):
+            masked = mask_text(raw)
+            self.assertEqual(masked, expected, raw)
+            self.assertFalse(independent_digit_leak(raw, masked), raw)
+            self.assertNotEqual(bad, expected, raw)
+        self.assertEqual(r8.mask_text(cases[0][0]), pre_fix[0])
+        self.assertEqual(r8.mask_text(cases[1][0]), cases[1][1])
+        self.assertEqual(r8.mask_text(cases[3][0]), pre_fix[3])
+        self.assertNotEqual(r8.mask_text(cases[4][0]), pre_fix[4])
+
+        self.assertTrue(independent_digit_leak("5123 4567 8901 2346", "5123 4567 8901 2346"))
+        self.assertFalse(independent_digit_leak("5123 4567 8901 2346", mask_text("5123 4567 8901 2346")))
 
 
 if __name__ == "__main__":
