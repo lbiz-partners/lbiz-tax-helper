@@ -36,6 +36,9 @@ FILING_ANSWER = "신고는 세무사와 상의해 주세요."
 PERSONAL_ANSWER = "사용자님 숫자나 상황을 넣은 계산·판단은 하지 않아요. 일반 정보 한 줄과 세무사 질문 목록만 드릴게요."
 CONFIRM_WITH_ADVISOR = "사용자님 경우에 맞는지는 세무사와 확인해 주세요."
 DISCLAIMER = "참고용 안내이며 세무대리나 세무상담이 아닙니다. 최종 판단은 직접 하시고, 중요한 건 세무사와 상의해 주세요."
+ILLUSTRATIVE_EXAMPLE_DISCLAIMER = "꾸민 예시·대략적인 금액이며 실제로 하실 때는 세무사와 직접 확인하세요"
+LBIZ_CALC_DISCLAIMER = "엘비즈 계산기로 낸 대략적인 금액이며 홈택스와 다를 수 있어요. 실제로 하실 때는 세무사와 직접 확인하세요."
+ELIGIBILITY_PREMISE = "사용자님이 대상이라고 하셨을 때만 계산해요. 대상 여부 판단은 세무사와 확인해 주세요."
 BASIS = "현금 기준 단순 합계이며 결산 조정·세액 계산은 하지 않았어요."
 HASH_MISMATCH = "[확인 필요] 계산 프로그램 해시가 달라 합계를 내지 않았어요."
 RRN_MSG = "주민번호가 보여서 옮기지 않았어요. 가려서 다시 보내 주세요"
@@ -71,6 +74,9 @@ LINT_TERMS = ("기장 대행", "기장대행", "장부 대행", "장부대행", 
               "제휴 세무사", "제휴세무사", "세무사 매칭", "세무사매칭", "제휴 노무사", "제휴노무사",
               "노무사 매칭", "노무사매칭", "노무사 연결", "노무사연결", "세무사 연결", "세무사연결",
               "세무사 소개", "세무사소개", "장부 대신", "장부대신", "대신 작성", "대신작성")
+OFFICIAL_CALC_TERMS = ("홈택스 기준", "홈택스기준", "국세청 계산", "국세청계산", "정부 계산", "정부계산",
+                       "공식 계산", "공식계산", "정확한 세액", "정확한세액", "확정 세액", "확정세액",
+                       "신고용 계산", "신고용계산")
 LEGAL_TERM = "기장세액공제"
 
 ADVISOR_QUESTIONS = [
@@ -1545,6 +1551,7 @@ def topic_lines(topic_id):
         "[{} {}] 일반 정보: {} — 근거 조문: {} — 적용 기간·시행일 {} — 출처 주소: {} — 확인일 {} ({})".format(
             topic_id, t["title"], t["info"], t["basis"], CHECK, " · ".join(urls), CHECK_DATE, CHECK_ORG),
         "세율·한도·금액·기한 같은 숫자: " + NUMBER_SLOT,
+        "꾸민 예시를 드릴 때는 반드시 「{}」 문장을 붙여요.".format(ILLUSTRATIVE_EXAMPLE_DISCLAIMER),
         CONFIRM_WITH_ADVISOR,
         "남은 {}: {}".format(CHECK, t["remaining"]),
         DISCLAIMER,
@@ -1581,8 +1588,23 @@ def cmd_guard(args):
             general = "주제 목록(G1·G2·G3·G4·G6·G7·G8·G15) 가운데 궁금한 주제를 골라 주시면 일반 정보 한 줄을 드릴게요."
         return finish("answered", 0, {"category": "personal", "answer": PERSONAL_ANSWER,
                                       "related_topic": related or "", "general_info": general,
-                                      "questions": ADVISOR_QUESTIONS, "advisor_note": CONFIRM_WITH_ADVISOR})
+                                      "questions": ADVISOR_QUESTIONS, "advisor_note": CONFIRM_WITH_ADVISOR,
+                                      "illustrative_example_note": "꾸민 예시를 드릴 때는 반드시 「{}」 문장을 붙여요.".format(ILLUSTRATIVE_EXAMPLE_DISCLAIMER)})
     return finish("pass", 0, {"category": "pass", "answer": ""})
+
+
+ILLUSTRATIVE_EXAMPLE_PATTERNS = (
+    "가상의 사장님", "가상의 사업장", "가상의 회사", "가상의 매출", "가상의 금액",
+    "○○원", "○○억", "○○만원", "○○천만원", "○억원", "○만원",
+    "예시로", "예시입니다", "예시예요", "꾸민 예시",
+)
+
+
+def text_has_illustrative_example(text):
+    for pat in ILLUSTRATIVE_EXAMPLE_PATTERNS:
+        if pat in text:
+            return True
+    return False
 
 
 def lint_hits(text):
@@ -1591,9 +1613,16 @@ def lint_hits(text):
         n = text.count(term)
         if n:
             hits.append({"term": term, "count": n})
+    for term in OFFICIAL_CALC_TERMS:
+        n = text.count(term)
+        if n:
+            hits.append({"term": term, "count": n, "reason": "관공서 공식 결과로 오해할 표현"})
     n = text.replace(LEGAL_TERM, "").count("기장")
     if n:
         hits.append({"term": "기장(기장세액공제 밖)", "count": n})
+    if text_has_illustrative_example(text) and ILLUSTRATIVE_EXAMPLE_DISCLAIMER not in text:
+        hits.append({"term": "꾸민 예시에 면책조항 누락", "count": 1,
+                     "required": ILLUSTRATIVE_EXAMPLE_DISCLAIMER})
     return hits
 
 
@@ -1633,6 +1662,111 @@ def cmd_list_drafts(args):
     return finish("ok", 0, {"count": len(files), "files": files})
 
 
+ESTIMABLE_TOPICS = {
+    "G2": {
+        "name": "기장세액공제",
+        "formula": "min(산출세액 * 공제율, 한도)",
+        "inputs": ["산출세액", "공제율", "한도"],
+        "basis": "소득세법 제56조의2",
+    },
+}
+
+
+def validate_estimate_input(name, value, source_article, check_date):
+    if value is None or value == "":
+        return False, "{}의 값이 없어요.".format(name)
+    if source_article is None or source_article.strip() == "":
+        return False, "{}의 근거 조문이 없어요.".format(name)
+    if check_date is None or check_date.strip() == "":
+        return False, "{}의 확인일이 없어요.".format(name)
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", check_date.strip()):
+        return False, "{}의 확인일은 YYYY-MM-DD 꼴이어야 해요.".format(name)
+    return True, None
+
+
+def cmd_estimate(args):
+    print(NOTICE)
+    topic_id = args.topic.strip().upper()
+
+    if topic_id not in ESTIMABLE_TOPICS:
+        print("입력 오류: {} 주제는 계산 공식이 준비되지 않았어요. 준비된 주제: {}".format(
+            topic_id, ", ".join(ESTIMABLE_TOPICS.keys())))
+        return finish("not_estimable", 2, {"topic": topic_id, "available": list(ESTIMABLE_TOPICS.keys())})
+
+    topic = ESTIMABLE_TOPICS[topic_id]
+
+    if topic_id == "G2":
+        tax_amount = args.tax_amount
+        rate = args.rate
+        limit = args.limit
+        rate_source = args.rate_source
+        rate_date = args.rate_date
+        limit_source = args.limit_source
+        limit_date = args.limit_date
+
+        errors = []
+
+        if tax_amount is None or tax_amount < 0:
+            errors.append("산출세액이 없거나 음수예요.")
+
+        ok, err = validate_estimate_input("공제율", rate, rate_source, rate_date)
+        if not ok:
+            errors.append(err)
+
+        ok, err = validate_estimate_input("한도", limit, limit_source, limit_date)
+        if not ok:
+            errors.append(err)
+
+        if errors:
+            print("입력 오류: " + " ".join(errors))
+            print(CHECK + " 법제처 원문을 확인한 뒤 근거 조문과 확인일을 함께 넘겨 주세요.")
+            return finish("missing_source", 2, {"errors": errors})
+
+        if rate <= 0 or rate > 1:
+            print("입력 오류: 공제율은 0보다 크고 1 이하(예: 0.2)여야 해요.")
+            return finish("input_error", 2)
+
+        if limit < 0:
+            print("입력 오류: 한도는 0 이상이어야 해요.")
+            return finish("input_error", 2)
+
+        raw_deduction = tax_amount * rate
+        deduction = min(raw_deduction, limit)
+        deduction_int = int(deduction)
+
+        print("[{} {}] 대략적인 계산 결과".format(topic_id, topic["name"]))
+        print("- 공식: {}".format(topic["formula"]))
+        print("- 입력값:")
+        print("  - 산출세액: {:,}원 (사용자님 입력)".format(tax_amount))
+        print("  - 공제율: {} (근거: {}, 확인일: {})".format(rate, rate_source, rate_date))
+        print("  - 한도: {:,}원 (근거: {}, 확인일: {})".format(limit, limit_source, limit_date))
+        print("- 계산: min({:,} × {}, {:,}) = {:,}원".format(tax_amount, rate, limit, deduction_int))
+        print("")
+        print(ELIGIBILITY_PREMISE)
+        print(LBIZ_CALC_DISCLAIMER)
+        print(DISCLAIMER)
+
+        return finish("ok", 0, {
+            "topic": topic_id,
+            "result": deduction_int,
+            "formula": topic["formula"],
+            "inputs": {
+                "tax_amount": tax_amount,
+                "rate": rate,
+                "rate_source": rate_source,
+                "rate_date": rate_date,
+                "limit": limit,
+                "limit_source": limit_source,
+                "limit_date": limit_date,
+            },
+            "eligibility_premise": ELIGIBILITY_PREMISE,
+            "lbiz_calc_disclaimer": LBIZ_CALC_DISCLAIMER,
+        })
+
+    print("입력 오류: {} 주제의 계산 로직이 아직 구현되지 않았어요.".format(topic_id))
+    return finish("not_implemented", 2, {"topic": topic_id})
+
+
 def build_parser():
     parser = KoreanArgumentParser(prog="ledger_calc.py", description="세금정리도우미 장부 초안 계산 프로그램 (" + NOTICE + ")")
     sub = parser.add_subparsers(dest="command", parser_class=KoreanArgumentParser)
@@ -1664,6 +1798,17 @@ def build_parser():
     p = sub.add_parser("list-drafts", help="지울 수 있는 파일 이름·개수만 보기(지우지 않음)")
     p.add_argument("--dir", required=True, help="장부 초안 폴더")
     p.set_defaults(func=cmd_list_drafts)
+
+    p = sub.add_parser("estimate", help="법제처 확인 값으로 대략적인 금액 계산 (대상이라고 하셨을 때만)")
+    p.add_argument("--topic", required=True, help="주제 번호(예: G2)")
+    p.add_argument("--tax-amount", type=int, help="[G2] 산출세액 (원)")
+    p.add_argument("--rate", type=float, help="[G2] 공제율 (예: 0.2)")
+    p.add_argument("--rate-source", help="[G2] 공제율 근거 조문 (예: 소득세법 제56조의2)")
+    p.add_argument("--rate-date", help="[G2] 공제율 확인일 (YYYY-MM-DD)")
+    p.add_argument("--limit", type=int, help="[G2] 한도 (원)")
+    p.add_argument("--limit-source", help="[G2] 한도 근거 조문")
+    p.add_argument("--limit-date", help="[G2] 한도 확인일 (YYYY-MM-DD)")
+    p.set_defaults(func=cmd_estimate)
     return parser
 
 

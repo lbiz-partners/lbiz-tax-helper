@@ -452,7 +452,7 @@ class LedgerTests(unittest.TestCase):
             self.assertTrue(tail["general_info"])
             self.assertGreaterEqual(len(tail["questions"]), 3)
             self.assertEqual(set(tail), {"category", "answer", "related_topic", "general_info", "questions",
-                                         "advisor_note", "status", "exit_code", "notice"})
+                                         "advisor_note", "illustrative_example_note", "status", "exit_code", "notice"})
             self.assertIsNone(re.search(r"\d[\d,]*\s*원", stdout))
         code, _, tail = run("guard", "--text", "영수증 정리 방법 알려 주세요")
         self.assertEqual(tail["category"], "pass")
@@ -1699,6 +1699,228 @@ class LedgerTests(unittest.TestCase):
         for raw in cases:
             masked = mask_text(raw)
             self.assertFalse(independent_digit_leak(raw, masked), raw)
+
+    def test_38_illustrative_example_requires_disclaimer(self):
+        """꾸민 예시에는 반드시 면책조항이 있어야 lint 통과."""
+        EXAMPLE_DISCLAIMER = "꾸민 예시·대략적인 금액이며 실제로 하실 때는 세무사와 직접 확인하세요"
+        bad_examples = (
+            "가상의 사장님이 매출 1억 원일 때 예시입니다.",
+            "가상의 사업장 예시로 설명하면",
+            "○○원인 경우를 예시로 보여 드릴게요.",
+            "○○억 매출 가상의 회사",
+            "꾸민 예시로 보여드리면",
+            "가상의 금액으로 설명하면",
+        )
+        for text in bad_examples:
+            code, _, tail = run("lint", "--text", text)
+            self.assertEqual(code, 2, text)
+            self.assertEqual(tail["status"], "blocked", text)
+            hit_terms = [h["term"] for h in tail["hits"]]
+            self.assertIn("꾸민 예시에 면책조항 누락", hit_terms, text)
+
+        good_examples = (
+            "가상의 사장님이 매출 1억 원일 때 예시입니다. " + EXAMPLE_DISCLAIMER,
+            "가상의 사업장 예시로 설명하면... " + EXAMPLE_DISCLAIMER,
+            "○○원인 경우를 예시로 보여 드릴게요. " + EXAMPLE_DISCLAIMER,
+        )
+        for text in good_examples:
+            code, _, tail = run("lint", "--text", text)
+            self.assertEqual(code, 0, text)
+            self.assertEqual(tail["hits"], [], text)
+
+    def test_39_eligibility_judgment_refused_but_calculation_allowed(self):
+        """대상 여부 판단은 하지 않지만, 대상이라고 하면 출처 있는 값으로 계산은 허용."""
+        eligibility_questions = (
+            "이 지출 경비 처리되나요?",
+            "저 간편장부 대상자인가요?",
+            "복식부기 해야 하나요?",
+        )
+        for text in eligibility_questions:
+            code, stdout, tail = run("guard", "--text", text)
+            self.assertEqual(code, 0, text)
+            self.assertEqual(tail["category"], "personal", text)
+            self.assertIn("계산·판단은 하지 않아요", tail["answer"], text)
+
+    def test_40_no_hardcoded_legal_numbers_in_rules_and_output(self):
+        """규칙 파일과 프로그램 출력에 법 기준 숫자(세율·한도 등)가 박혀 있지 않음."""
+        rules = read(RULES)
+        for pattern in (r"(?<!\d)\d{1,2}\s*%", r"\d[\d,]*\s*만\s*원", r"\d[\d,]*\s*억\s*원"):
+            match = re.search(pattern, rules)
+            self.assertIsNone(match, "규칙 파일에 숫자 패턴 발견: {}".format(pattern))
+
+        src = read(PROG)
+        tax_rate_patterns = (
+            r'=\s*0\.\d{2,}',
+            r'=\s*\d{1,2}\s*%',
+        )
+        for pattern in tax_rate_patterns:
+            match = re.search(pattern, src)
+            self.assertIsNone(match, "프로그램에 세율 패턴 발견: {}".format(pattern))
+
+        outputs = []
+        for topic_id in TOPIC_IDS:
+            code, stdout, _ = run("topic", "--id", topic_id)
+            self.assertEqual(code, 0, topic_id)
+            outputs.append(stdout)
+
+        for output in outputs:
+            exclude_patterns = [
+                r"https?://\S+",
+                r"제\d+(?:·\d+)*(?:조(?:의\d+)?|항|호)",
+                r"2026-11-03",
+                r"G\d+",
+                r"joNo=\d+",
+            ]
+            filtered = output
+            for pat in exclude_patterns:
+                filtered = re.sub(pat, "", filtered)
+            match = re.search(r"(?<!\[확인 필요: 법제처 원문 확인 뒤에만\])\d{1,2}\s*%", filtered)
+            if match:
+                self.fail("topic 출력에 숫자 패턴 발견: {}".format(match.group()))
+
+    def test_41_topic_and_guard_include_example_disclaimer_note(self):
+        """topic과 guard 출력에 꾸민 예시 면책조항 안내가 포함됨."""
+        EXAMPLE_DISCLAIMER = "꾸민 예시·대략적인 금액이며 실제로 하실 때는 세무사와 직접 확인하세요"
+
+        code, stdout, _ = run("topic", "--id", "G2")
+        self.assertEqual(code, 0)
+        self.assertIn(EXAMPLE_DISCLAIMER, stdout)
+        self.assertIn("꾸민 예시를 드릴 때는 반드시", stdout)
+
+        code, stdout, tail = run("guard", "--text", "제 경우 얼마 아끼나요?")
+        self.assertEqual(code, 0)
+        self.assertEqual(tail["category"], "personal")
+        self.assertIn("illustrative_example_note", tail)
+        self.assertIn(EXAMPLE_DISCLAIMER, tail["illustrative_example_note"])
+
+    def test_42_estimate_requires_source_and_date(self):
+        """estimate 명령은 값·근거 조문·확인일이 모두 있어야 계산함."""
+        code, stdout, tail = run("estimate", "--topic", "G2",
+                                 "--tax-amount", "1000000",
+                                 "--rate", "0.2",
+                                 "--limit", "1000000")
+        self.assertEqual(code, 2)
+        self.assertEqual(tail["status"], "missing_source")
+        self.assertIn("[확인 필요]", stdout)
+
+        code, stdout, tail = run("estimate", "--topic", "G2",
+                                 "--tax-amount", "1000000",
+                                 "--rate", "0.2",
+                                 "--rate-source", "소득세법 제56조의2",
+                                 "--limit", "1000000",
+                                 "--limit-source", "소득세법 제56조의2",
+                                 "--limit-date", "2026-11-03")
+        self.assertEqual(code, 2)
+        self.assertEqual(tail["status"], "missing_source")
+
+        code, stdout, tail = run("estimate", "--topic", "G2",
+                                 "--tax-amount", "1000000",
+                                 "--rate", "0.2",
+                                 "--rate-source", "소득세법 제56조의2",
+                                 "--rate-date", "2026-11-03",
+                                 "--limit", "1000000",
+                                 "--limit-source", "소득세법 제56조의2",
+                                 "--limit-date", "2026-11-03")
+        self.assertEqual(code, 0, stdout)
+        self.assertEqual(tail["status"], "ok")
+
+    def test_43_estimate_includes_lbiz_calc_disclaimer(self):
+        """estimate 결과에 엘비즈 계산기 면책조항이 반드시 포함됨."""
+        LBIZ_DISCLAIMER = "엘비즈 계산기로 낸 대략적인 금액이며 홈택스와 다를 수 있어요. 실제로 하실 때는 세무사와 직접 확인하세요."
+        ELIGIBILITY_PREMISE = "사용자님이 대상이라고 하셨을 때만 계산해요"
+
+        code, stdout, tail = run("estimate", "--topic", "G2",
+                                 "--tax-amount", "1000000",
+                                 "--rate", "0.2",
+                                 "--rate-source", "소득세법 제56조의2",
+                                 "--rate-date", "2026-11-03",
+                                 "--limit", "1000000",
+                                 "--limit-source", "소득세법 제56조의2",
+                                 "--limit-date", "2026-11-03")
+        self.assertEqual(code, 0)
+        self.assertIn(LBIZ_DISCLAIMER, stdout)
+        self.assertIn(ELIGIBILITY_PREMISE, stdout)
+        self.assertEqual(tail["lbiz_calc_disclaimer"], LBIZ_DISCLAIMER)
+        self.assertIn("대상", tail["eligibility_premise"])
+
+    def test_44_estimate_calculation_correct(self):
+        """estimate G2 계산이 공식대로 수행됨."""
+        code, stdout, tail = run("estimate", "--topic", "G2",
+                                 "--tax-amount", "500000",
+                                 "--rate", "0.2",
+                                 "--rate-source", "소득세법 제56조의2",
+                                 "--rate-date", "2026-11-03",
+                                 "--limit", "1000000",
+                                 "--limit-source", "소득세법 제56조의2",
+                                 "--limit-date", "2026-11-03")
+        self.assertEqual(code, 0)
+        self.assertEqual(tail["result"], 100000)
+
+        code, stdout, tail = run("estimate", "--topic", "G2",
+                                 "--tax-amount", "10000000",
+                                 "--rate", "0.2",
+                                 "--rate-source", "소득세법 제56조의2",
+                                 "--rate-date", "2026-11-03",
+                                 "--limit", "1000000",
+                                 "--limit-source", "소득세법 제56조의2",
+                                 "--limit-date", "2026-11-03")
+        self.assertEqual(code, 0)
+        self.assertEqual(tail["result"], 1000000)
+
+    def test_45_official_calc_terms_banned(self):
+        """관공서 공식 결과로 오해할 표현은 lint에서 차단됨."""
+        banned = (
+            "홈택스 기준으로 계산하면",
+            "국세청 계산 결과",
+            "정확한 세액은",
+            "신고용 계산입니다",
+            "공식 계산 결과",
+        )
+        for text in banned:
+            code, _, tail = run("lint", "--text", text)
+            self.assertEqual(code, 2, text)
+            self.assertEqual(tail["status"], "blocked", text)
+            hit_terms = [h["term"] for h in tail["hits"]]
+            self.assertTrue(any("기준" in t or "계산" in t or "세액" in t for t in hit_terms), text)
+
+        allowed = (
+            "대략적인 금액입니다",
+            "엘비즈 계산기로 낸 결과",
+            "세무사와 확인하세요",
+        )
+        for text in allowed:
+            code, _, tail = run("lint", "--text", text)
+            self.assertEqual(code, 0, text)
+
+    def test_46_estimate_unavailable_topic(self):
+        """estimate는 공식이 준비된 주제만 계산함."""
+        code, stdout, tail = run("estimate", "--topic", "G1",
+                                 "--tax-amount", "1000000",
+                                 "--rate", "0.2",
+                                 "--rate-source", "테스트",
+                                 "--rate-date", "2026-11-03",
+                                 "--limit", "1000000",
+                                 "--limit-source", "테스트",
+                                 "--limit-date", "2026-11-03")
+        self.assertEqual(code, 2)
+        self.assertEqual(tail["status"], "not_estimable")
+        self.assertIn("G2", tail["available"])
+
+    def test_47_no_hardcoded_rates_in_program(self):
+        """프로그램에 세율·한도 숫자가 박혀 있지 않음."""
+        src = read(PROG)
+        tax_patterns = (
+            r'rate\s*=\s*0\.\d+',
+            r'limit\s*=\s*\d{5,}',
+            r'공제율\s*=\s*0\.\d+',
+            r'한도\s*=\s*\d{5,}',
+        )
+        for pattern in tax_patterns:
+            for match in re.finditer(pattern, src, re.IGNORECASE):
+                context = src[max(0, match.start()-50):match.end()+50]
+                if "args." in context or "test" in context.lower() or "example" in context.lower():
+                    continue
+                self.fail("프로그램에 하드코딩된 세율/한도 발견: {}".format(match.group()))
 
 
 if __name__ == "__main__":
