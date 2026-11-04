@@ -1825,9 +1825,9 @@ class LedgerTests(unittest.TestCase):
                                  "--business-income", "800000",
                                  "--total-income", "1000000",
                                  "--rate", "0.5",
-                                 "--rate-source", "시험용 가짜 조문",
+                                 "--rate-source", "시험용 가짜 법령",
                                  "--limit", "2000000",
-                                 "--limit-source", "시험용 가짜 조문",
+                                 "--limit-source", "시험용 가짜 법령",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 2)
         self.assertEqual(tail["status"], "missing_source")
@@ -1837,10 +1837,10 @@ class LedgerTests(unittest.TestCase):
                                  "--business-income", "800000",
                                  "--total-income", "1000000",
                                  "--rate", "0.5",
-                                 "--rate-source", "시험용 가짜 조문",
+                                 "--rate-source", "시험용 가짜 법령",
                                  "--rate-date", "2026-11-03",
                                  "--limit", "2000000",
-                                 "--limit-source", "시험용 가짜 조문",
+                                 "--limit-source", "시험용 가짜 법령",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0, stdout)
         self.assertEqual(tail["status"], "ok")
@@ -1855,10 +1855,10 @@ class LedgerTests(unittest.TestCase):
                                  "--business-income", "800000",
                                  "--total-income", "1000000",
                                  "--rate", "0.5",
-                                 "--rate-source", "시험용 가짜 조문",
+                                 "--rate-source", "시험용 가짜 법령",
                                  "--rate-date", "2026-11-03",
                                  "--limit", "2000000",
-                                 "--limit-source", "시험용 가짜 조문",
+                                 "--limit-source", "시험용 가짜 법령",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0)
         self.assertIn(LBIZ_DISCLAIMER, stdout)
@@ -1874,10 +1874,10 @@ class LedgerTests(unittest.TestCase):
                                  "--business-income", "800000",
                                  "--total-income", "1000000",
                                  "--rate", "0.5",
-                                 "--rate-source", "시험용 가짜 조문",
+                                 "--rate-source", "시험용 가짜 법령",
                                  "--rate-date", "2026-11-03",
                                  "--limit", "3000000",
-                                 "--limit-source", "시험용 가짜 조문",
+                                 "--limit-source", "시험용 가짜 법령",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0)
         self.assertEqual(tail["result"], 200000)  # 500000 * 0.8 * 0.5 = 200000
@@ -1889,10 +1889,10 @@ class LedgerTests(unittest.TestCase):
                                  "--business-income", "1000000",
                                  "--total-income", "1000000",
                                  "--rate", "0.5",
-                                 "--rate-source", "시험용 가짜 조문",
+                                 "--rate-source", "시험용 가짜 법령",
                                  "--rate-date", "2026-11-03",
                                  "--limit", "2000000",
-                                 "--limit-source", "시험용 가짜 조문",
+                                 "--limit-source", "시험용 가짜 법령",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0)
         self.assertEqual(tail["result"], 2000000)  # min(5000000, 2000000)
@@ -1929,10 +1929,10 @@ class LedgerTests(unittest.TestCase):
                                  "--business-income", "800000",
                                  "--total-income", "1000000",
                                  "--rate", "0.5",
-                                 "--rate-source", "시험용 가짜 조문",
+                                 "--rate-source", "시험용 가짜 법령",
                                  "--rate-date", "2026-11-03",
                                  "--limit", "2000000",
-                                 "--limit-source", "시험용 가짜 조문",
+                                 "--limit-source", "시험용 가짜 법령",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 2)
         self.assertEqual(tail["status"], "not_estimable")
@@ -1966,8 +1966,8 @@ class LedgerTests(unittest.TestCase):
     def test_48_estimate_refusal_conditions(self):
         """estimate는 입력값 검증 실패 시 거절함."""
         base_args = ["estimate", "--topic", "G2",
-                     "--rate", "0.5", "--rate-source", "시험용 가짜 조문", "--rate-date", "2026-11-03",
-                     "--limit", "2000000", "--limit-source", "시험용 가짜 조문", "--limit-date", "2026-11-03"]
+                     "--rate", "0.5", "--rate-source", "시험용 가짜 법령", "--rate-date", "2026-11-03",
+                     "--limit", "2000000", "--limit-source", "시험용 가짜 법령", "--limit-date", "2026-11-03"]
 
         # total_income <= 0
         code, stdout, tail = run(*base_args,
@@ -2005,10 +2005,10 @@ class LedgerTests(unittest.TestCase):
                                  "--business-income", "800000",
                                  "--total-income", "1000000",
                                  "--rate", "0.5",
-                                 "--rate-source", "시험용 가짜 조문",
+                                 "--rate-source", "시험용 가짜 법령",
                                  "--rate-date", "2026-11-03",
                                  "--limit", "2000000",
-                                 "--limit-source", "시험용 가짜 조문",
+                                 "--limit-source", "시험용 가짜 법령",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0)
         self.assertIn(G2_EXCLUSION_WARNING, stdout)
@@ -2018,8 +2018,8 @@ class LedgerTests(unittest.TestCase):
         """estimate는 유효하지 않은 날짜를 거부함."""
         base_args = ["estimate", "--topic", "G2",
                      "--tax-amount", "1000000", "--business-income", "800000", "--total-income", "1000000",
-                     "--rate", "0.5", "--rate-source", "시험용 가짜 조문",
-                     "--limit", "2000000", "--limit-source", "시험용 가짜 조문", "--limit-date", "2026-11-03"]
+                     "--rate", "0.5", "--rate-source", "시험용 가짜 법령",
+                     "--limit", "2000000", "--limit-source", "시험용 가짜 법령", "--limit-date", "2026-11-03"]
 
         # 존재하지 않는 날짜 (13월)
         code, stdout, tail = run(*base_args, "--rate-date", "2026-13-45")
@@ -2039,15 +2039,15 @@ class LedgerTests(unittest.TestCase):
 
         # 공제율 값 누락
         code, stdout, tail = run(*base_args,
-                                 "--rate-source", "시험용 가짜 조문", "--rate-date", "2026-11-03",
-                                 "--limit", "2000000", "--limit-source", "시험용 가짜 조문", "--limit-date", "2026-11-03")
+                                 "--rate-source", "시험용 가짜 법령", "--rate-date", "2026-11-03",
+                                 "--limit", "2000000", "--limit-source", "시험용 가짜 법령", "--limit-date", "2026-11-03")
         self.assertEqual(code, 2)
         self.assertTrue(any("공제율" in e and "값이 없어요" in e for e in tail["errors"]))
 
         # 한도 값 누락
         code, stdout, tail = run(*base_args,
-                                 "--rate", "0.5", "--rate-source", "시험용 가짜 조문", "--rate-date", "2026-11-03",
-                                 "--limit-source", "시험용 가짜 조문", "--limit-date", "2026-11-03")
+                                 "--rate", "0.5", "--rate-source", "시험용 가짜 법령", "--rate-date", "2026-11-03",
+                                 "--limit-source", "시험용 가짜 법령", "--limit-date", "2026-11-03")
         self.assertEqual(code, 2)
         self.assertTrue(any("한도" in e and "값이 없어요" in e for e in tail["errors"]))
 
@@ -2075,21 +2075,87 @@ class LedgerTests(unittest.TestCase):
 
     def test_53_estimate_g2_prerequisite_shown(self):
         """estimate G2 결과에 제1항 전제(복식부기·서류 제출)가 포함됨."""
-        G2_PREREQUISITE = "이 공제는 간편장부대상자가 복식부기로 기장하고, 제70조제4항제3호 서류를 제출할 때 적용돼요."
+        G2_PREREQUISITE = "이 공제는 간편장부대상자가 복식부기 장부를 작성하고, 제70조제4항제3호 서류를 제출할 때 적용돼요."
 
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "1000000",
                                  "--business-income", "800000",
                                  "--total-income", "1000000",
                                  "--rate", "0.5",
-                                 "--rate-source", "시험용 가짜 조문",
+                                 "--rate-source", "시험용 가짜 법령",
                                  "--rate-date", "2026-11-03",
                                  "--limit", "2000000",
-                                 "--limit-source", "시험용 가짜 조문",
+                                 "--limit-source", "시험용 가짜 법령",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0)
         self.assertIn(G2_PREREQUISITE, stdout)
         self.assertEqual(tail["g2_prerequisite"], G2_PREREQUISITE)
+
+    def test_54_estimate_output_passes_lint(self):
+        """estimate 정상 출력을 lint에 넣으면 통과해야 함 (N-1)."""
+        code, stdout, tail = run("estimate", "--topic", "G2",
+                                 "--tax-amount", "1000000",
+                                 "--business-income", "800000",
+                                 "--total-income", "1000000",
+                                 "--rate", "0.5",
+                                 "--rate-source", "시험용 가짜 법령",
+                                 "--rate-date", "2026-11-03",
+                                 "--limit", "2000000",
+                                 "--limit-source", "시험용 가짜 법령",
+                                 "--limit-date", "2026-11-03")
+        self.assertEqual(code, 0)
+
+        lint_code, _, lint_tail = run("lint", "--text", stdout)
+        self.assertEqual(lint_code, 0, "estimate 출력이 lint를 통과해야 함")
+        self.assertEqual(lint_tail["hits"], [])
+
+    def test_55_estimate_rejects_invalid_date_range(self):
+        """확인일이 2020~2030 범위 밖이면 거부 (L-1 부분)."""
+        base_args = ["estimate", "--topic", "G2",
+                     "--tax-amount", "1000000", "--business-income", "800000", "--total-income", "1000000",
+                     "--rate", "0.5", "--rate-source", "시험용 가짜 법령",
+                     "--limit", "2000000", "--limit-source", "시험용 가짜 법령", "--limit-date", "2026-11-03"]
+
+        # 너무 먼 미래 (2099)
+        code, stdout, tail = run(*base_args, "--rate-date", "2099-01-01")
+        self.assertEqual(code, 2)
+        self.assertTrue(any("범위" in e for e in tail["errors"]))
+
+        # 너무 오래 전 (2000)
+        code, stdout, tail = run(*base_args, "--rate-date", "2000-01-01")
+        self.assertEqual(code, 2)
+        self.assertTrue(any("범위" in e for e in tail["errors"]))
+
+    def test_56_estimate_rejects_invalid_source_article(self):
+        """근거 조문이 법령 형식이 아니면 거부 (L-1 부분)."""
+        base_args = ["estimate", "--topic", "G2",
+                     "--tax-amount", "1000000", "--business-income", "800000", "--total-income", "1000000",
+                     "--rate", "0.5", "--rate-date", "2026-11-03",
+                     "--limit", "2000000", "--limit-source", "시험용 가짜 법령", "--limit-date", "2026-11-03"]
+
+        # 단일 문자 "x"
+        code, stdout, tail = run(*base_args, "--rate-source", "x")
+        self.assertEqual(code, 2)
+        self.assertTrue(any("법령 형식이 아니에요" in e for e in tail["errors"]))
+
+        # 빈 문자열 취급될 공백만
+        code, stdout, tail = run(*base_args, "--rate-source", "   ")
+        self.assertEqual(code, 2)
+
+    def test_57_estimate_rejects_rate_over_one(self):
+        """공제율이 1을 초과하면 거부."""
+        code, stdout, tail = run("estimate", "--topic", "G2",
+                                 "--tax-amount", "1000000",
+                                 "--business-income", "800000",
+                                 "--total-income", "1000000",
+                                 "--rate", "1.5",
+                                 "--rate-source", "시험용 가짜 법령",
+                                 "--rate-date", "2026-11-03",
+                                 "--limit", "2000000",
+                                 "--limit-source", "시험용 가짜 법령",
+                                 "--limit-date", "2026-11-03")
+        self.assertEqual(code, 2)
+        self.assertIn("1 이하", stdout)
 
 
 if __name__ == "__main__":

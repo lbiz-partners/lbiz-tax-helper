@@ -10,7 +10,7 @@
 | `tax-ledger.md` | 봇용 규칙 초안 (7장에 `ledger_calc.py` sha256 고정) |
 | `leak_check.py` | 가림 결과 노출 검사 (`ledger_calc` 를 import 하지 않음. 연결 run·last4 판정은 **같은 방식을 따로 짠 보조 검사기**이며, 완전히 독립된 알고리즘이라고 보기는 어려움) |
 | `scripts/fuzz_leak_report.py` | `mask_text` + `leak_check` fuzz 재현 |
-| `tests/test_ledger.py` | 시험 49+개 (estimate·lint·꾸민 예시 면책 포함) |
+| `tests/test_ledger.py` | 시험 57개 (estimate·lint·꾸민 예시 면책·입력 검증 포함) |
 | `reference/ledger_calc_baseline.py` | 이전 세대 보관본 (회귀 비교용, 실행에 쓰지 않음) |
 
 ## 시험 실행

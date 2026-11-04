@@ -39,7 +39,7 @@ DISCLAIMER = "참고용 안내이며 세무대리나 세무상담이 아닙니�
 ILLUSTRATIVE_EXAMPLE_DISCLAIMER = "꾸민 예시·대략적인 금액이며 실제로 하실 때는 세무사와 직접 확인하세요"
 LBIZ_CALC_DISCLAIMER = "엘비즈 계산기로 낸 대략적인 금액이며 홈택스와 다를 수 있어요. 실제로 하실 때는 세무사와 직접 확인하세요."
 ELIGIBILITY_PREMISE = "사용자님이 대상이라고 하셨을 때만 계산해요. 대상 여부 판단은 세무사와 확인해 주세요."
-G2_PREREQUISITE = "이 공제는 간편장부대상자가 복식부기로 기장하고, 제70조제4항제3호 서류를 제출할 때 적용돼요."
+G2_PREREQUISITE = "이 공제는 간편장부대상자가 복식부기 장부를 작성하고, 제70조제4항제3호 서류를 제출할 때 적용돼요."
 BASIS = "현금 기준 단순 합계이며 결산 조정·세액 계산은 하지 않았어요."
 HASH_MISMATCH = "[확인 필요] 계산 프로그램 해시가 달라 합계를 내지 않았어요."
 RRN_MSG = "주민번호가 보여서 옮기지 않았어요. 가려서 다시 보내 주세요"
@@ -1694,6 +1694,9 @@ def validate_estimate_input(name, value, source_article, check_date):
         return False, "{}의 값이 없어요.".format(name)
     if source_article is None or source_article.strip() == "":
         return False, "{}의 근거 조문이 없어요.".format(name)
+    source_article = source_article.strip()
+    if len(source_article) < 2 or not re.search(r"제\d+조|법|령|규칙", source_article):
+        return False, "{}의 근거 조문이 법령 형식이 아니에요. 예시: 「소득세법 제○조」.".format(name)
     if check_date is None or check_date.strip() == "":
         return False, "{}의 확인일이 없어요.".format(name)
     check_date = check_date.strip()
@@ -1701,7 +1704,9 @@ def validate_estimate_input(name, value, source_article, check_date):
         return False, "{}의 확인일은 YYYY-MM-DD 꼴이어야 해요.".format(name)
     try:
         y, m, d = int(check_date[:4]), int(check_date[5:7]), int(check_date[8:10])
-        datetime.date(y, m, d)
+        parsed = datetime.date(y, m, d)
+        if y < 2020 or y > 2030:
+            return False, "{}의 확인일이 합리적 범위(2020~2030) 밖이에요.".format(name)
     except ValueError:
         return False, "{}의 확인일이 유효한 날짜가 아니에요.".format(name)
     return True, None
