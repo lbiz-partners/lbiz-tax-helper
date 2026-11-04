@@ -332,14 +332,15 @@ def iter_connected_digit_sequences(text):
             d0 = pos
             while pos < n and text[pos].isdigit():
                 pos += 1
+            clen = pos - d0
             letter_before = d0 > 0 and is_text_letter(text[d0 - 1])
-            chunks.append(pos - d0)
+            chunks.append(clen)
             if pos >= n:
                 break
             nxt = consume_separator_run(text, pos, n)
             if nxt is None:
                 break
-            if letter_before:
+            if letter_before and clen <= 2:
                 break
             pos = nxt
             if pos >= n or not text[pos].isdigit():
@@ -816,6 +817,50 @@ def run_is_small_counter_sequence(chunks, digits):
     return all(c <= 2 for c in chunks)
 
 
+def is_trailing_card_time_not_calendar(chunks):
+    """카드 4-4-4-4 직후 (2,2) 시각을 달력 날짜 꼬리로 오인하지 않아요."""
+    n = len(chunks)
+    if n < 6 or chunks[n - 2] != 2 or chunks[n - 1] != 2 or chunks[n - 3] != 4:
+        return False
+    for card_start in (n - 6, n - 7):
+        if card_start >= 0 and is_card_four_chunk_pattern(chunks, card_start):
+            return True
+    return False
+
+
+def is_trailing_calendar_date(chunks, digits):
+    n = len(chunks)
+    if n < 3:
+        return False
+    if is_trailing_card_time_not_calendar(chunks):
+        return False
+    return is_date_digit_sequence(chunks[n - 3:n], digits[-8:])
+
+
+def is_card_four_chunk_at(chunks, i):
+    if i + 3 >= len(chunks):
+        return False
+    if not all(chunks[i + k] == 4 for k in range(4)):
+        return False
+    if i >= 1 and chunks[i - 1] == 3 and chunks[i] == 4:
+        return False
+    if i >= 1 and chunks[0] == 3 and chunks[1] == 4 and i < 3:
+        return False
+    return True
+
+
+def iter_card_four_chunk_starts(chunks):
+    """겹치지 않게 4-4-4-4 카드 덩어리 시작 인덱스만."""
+    n = len(chunks)
+    i = 0
+    while i + 3 < n:
+        if is_card_four_chunk_at(chunks, i):
+            yield i
+            i += 4
+        else:
+            i += 1
+
+
 def iter_mask_spans_in_run(text, start, end, chunks, digits):
     """9자리 이상(또는 5자리 덩어리) connected run 은 기본 가림, 단독 예외 run 만 유지."""
     n = len(chunks)
@@ -824,22 +869,90 @@ def iter_mask_spans_in_run(text, start, end, chunks, digits):
     needs = any(c >= 5 for c in chunks) or len(digits) >= 9
     if not needs:
         return
-    if n >= 7 and is_date_digit_sequence(chunks[n - 3:n], digits[-8:]):
+
+    card_starts = list(iter_card_four_chunk_starts(chunks))
+    if card_starts:
+        for ci in card_starts:
+            s0, _ = chunk_char_range(text, start, end, chunks, ci)
+            _, s1 = chunk_char_range(text, start, end, chunks, ci + 3)
+            hide_all = (
+                ci == 0
+                and ci + 5 < n
+                and chunks[ci + 4] == 2
+                and chunks[ci + 5] == 2
+            )
+            yield s0, s1, "all" if hide_all else "last4"
+            if hide_all and ci + 4 < n:
+                tail = ci + 4
+                if tail + 3 < n and all(chunks[tail + k] == 2 for k in range(4)):
+                    _, mid = chunk_char_range(text, start, end, chunks, tail + 1)
+                    if mid < end and text[mid] in "~\u301c\uff5e":
+                        tc0, _ = chunk_char_range(text, start, end, chunks, tail)
+                        _, tc1 = chunk_char_range(text, start, end, chunks, tail + 1)
+                        yield tc0, tc1, "all"
+                elif tail + 2 < n and chunks[tail] == 2 and chunks[tail + 1] == 2 and chunks[tail + 2] == 2:
+                    tc0, _ = chunk_char_range(text, start, end, chunks, tail)
+                    _, tc1 = chunk_char_range(text, start, end, chunks, n - 1)
+                    yield tc0, tc1, "clock_head"
+                elif tail + 1 < n and chunks[tail] == 2 and chunks[tail + 1] == 2:
+                    _, mid = chunk_char_range(text, start, end, chunks, tail + 1)
+                    if mid < end and text[mid] in "~\u301c\uff5e":
+                        tc0, _ = chunk_char_range(text, start, end, chunks, tail)
+                        _, tc1 = chunk_char_range(text, start, end, chunks, tail + 1)
+                        yield tc0, tc1, "all"
+        if card_starts[0] > 0:
+            pre = card_starts[0] - 1
+            if any(chunks[k] >= 5 for k in range(pre + 1)) or sum(chunks[: card_starts[0]]) >= 9:
+                s0, _ = chunk_char_range(text, start, end, chunks, 0)
+                _, s1 = chunk_char_range(text, start, end, chunks, pre)
+                yield s0, s1, "last4"
+        covered = [False] * n
+        for ci in card_starts:
+            for j in range(ci, ci + 4):
+                covered[j] = True
+        tail_hi = n - 1
+        if n >= 3 and is_trailing_calendar_date(chunks, digits):
+            tail_hi = n - 4
+        elif n >= 2 and chunks[-2] == 2 and chunks[-1] == 2:
+            tail_hi = n - 3
+        u0 = next((i for i in range(n) if not covered[i]), n)
+        for i in range(u0, tail_hi + 1):
+            if covered[i]:
+                continue
+            if i + 2 < n and is_business_digit_sequence(chunks[i : i + 3]):
+                s0, _ = chunk_char_range(text, start, end, chunks, i)
+                _, s1 = chunk_char_range(text, start, end, chunks, i + 2)
+                yield s0, s1, "last4"
+                break
+            if chunks[i] >= 5:
+                s0, _ = chunk_char_range(text, start, end, chunks, i)
+                _, s1 = chunk_char_range(text, start, end, chunks, i)
+                yield s0, s1, "last4"
+                break
+            tail_chunks = [j for j in range(i, tail_hi + 1) if not covered[j]]
+            if tail_chunks and sum(chunks[j] for j in tail_chunks) >= 9:
+                s0, _ = chunk_char_range(text, start, end, chunks, tail_chunks[0])
+                _, s1 = chunk_char_range(text, start, end, chunks, tail_chunks[-1])
+                yield s0, s1, "last4"
+                break
+        return
+
+    if n >= 7 and is_trailing_calendar_date(chunks, digits):
         body_n = n - 3
         if body_n >= 1 and (any(chunks[i] >= 5 for i in range(body_n)) or sum(chunks[:body_n]) >= 9):
             s0, _ = chunk_char_range(text, start, end, chunks, 0)
             _, s1 = chunk_char_range(text, start, end, chunks, body_n - 1)
-            yield s0, s1
+            yield s0, s1, "last4"
             return
     if n >= 4 and is_date_digit_sequence(chunks[:3], digits[:8]):
         if not run_is_date_plus_short_plain_amount(text, start, end, chunks, digits):
             s0, _ = chunk_char_range(text, start, end, chunks, 3)
             _, s1 = chunk_char_range(text, start, end, chunks, n - 1)
-            yield s0, s1
+            yield s0, s1, "last4"
             return
     s0, _ = chunk_char_range(text, start, end, chunks, 0)
     _, s1 = chunk_char_range(text, start, end, chunks, n - 1)
-    yield s0, s1
+    yield s0, s1, "last4"
 
 
 def connected_run_contains_rrn(chunks, digits):
@@ -858,12 +971,24 @@ def mask_spans_for_text(norm):
     for start, end, chunks, digits in iter_connected_digit_sequences(norm):
         if connected_run_contains_rrn(chunks, digits):
             continue
-        for s0, s1 in iter_mask_spans_in_run(norm, start, end, chunks, digits):
-            spans.append((s0, s1))
+        for item in iter_mask_spans_in_run(norm, start, end, chunks, digits):
+            spans.append(item)
     return spans
 
 
-def mask_digits_in_token(token):
+def mask_digits_in_token(token, mode="last4"):
+    if mode == "all":
+        return "".join("*" if c.isdigit() else c for c in token)
+    if mode == "clock_head":
+        seen = 0
+        out = []
+        for c in token:
+            if c.isdigit():
+                seen += 1
+                out.append("*" if seen <= 2 else c)
+            else:
+                out.append(c)
+        return "".join(out)
     out = []
     seen = 0
     for c in reversed(token):
@@ -880,11 +1005,11 @@ def mask_text(text):
     original = text or ""
     norm, norm_to_orig = build_nfkc_mapping(original)
     out = list(original)
-    for start, end in reversed(mask_spans_for_text(norm)):
+    for start, end, mode in reversed(mask_spans_for_text(norm)):
         orig_indices = {norm_to_orig[ni] for ni in range(start, end)}
         o_start = min(orig_indices)
         o_end = max(orig_indices) + 1
-        masked = mask_digits_in_token(original[o_start:o_end])
+        masked = mask_digits_in_token(original[o_start:o_end], mode=mode)
         for j, ch in enumerate(masked):
             out[o_start + j] = ch
     return "".join(out)

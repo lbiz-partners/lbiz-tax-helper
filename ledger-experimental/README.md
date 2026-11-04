@@ -8,9 +8,9 @@
 |---|---|
 | `ledger_calc.py` | 장부·손익·현금 흐름 계산 (표준 라이브러리만) |
 | `tax-ledger.md` | 봇용 규칙 초안 (7장에 `ledger_calc.py` sha256 고정) |
-| `leak_check.py` | 가림 결과 노출 검사 (**ledger_calc 와 별도 구현**, 시험용) |
-| `scripts/fuzz_leak_report.py` | 독립 검사기 fuzz 재현 스크립트 |
-| `tests/test_ledger.py` | 시험 36개 |
+| `leak_check.py` | 가림 결과 노출 검사 (**ledger_calc 미사용**, 원문 숫자 위치·끝 4자리 규칙) |
+| `scripts/fuzz_leak_report.py` | `mask_text` + 독립 `leak_check` fuzz 재현 |
+| `tests/test_ledger.py` | 시험 37개 |
 | `reference/ledger_calc_r8.py` | 8차 보관본 (회귀 비교용, 실행에 쓰지 않음) |
 
 ## 시험 실행
@@ -20,15 +20,12 @@ cd ledger-experimental
 python3 -m unittest tests.test_ledger
 ```
 
-## 10차(2026-11-04) 요약
+## 11차(2026-11-04) 요약
 
-- **가림 구조:** 이웃 숫자 run 을 먼저 합쳐 9자리 이상이면 기본 가림 → 그다음 **단독 run** 만 예외(날짜·쉼표 금액·단위·전화·사업자번호 등).
-- **실험 기능:** 기본 꺼짐, MANIFEST 미포함. 합계·거절 로직은 그대로.
-- **노출 검사:** `leak_check.py` 는 제품 코드를 import 하지 않아요. `scripts/fuzz_leak_report.py` 로 strict/realistic fuzz 수치를 재현할 수 있어요(아래는 개발 VM 기준 예시).
-
-```bash
-python3 scripts/fuzz_leak_report.py
-```
+- **가림:** 글자 붙임(3자리 이상 덩어리)도 이웃 숫자와 연결·9+·4-4-4-4 카드 우선 가림. 주민번호 꼴은 줄 제외 우선.
+- **leak_check:** `ledger_calc` 를 import 하지 않음. 가림 함수를 복사하지 않고, 원문 민감 숫자 위치 대비 출력 노출만 검사.
+- **실험 기능:** 기본 꺼짐, MANIFEST 미포함.
+- **fuzz:** `python3 scripts/fuzz_leak_report.py` — strict / realistic / letter-glued / preceding-number+card, 각 5 seed × 3000.
 
 ## 켜는 방법 [확인 필요]
 

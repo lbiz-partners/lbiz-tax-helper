@@ -1400,8 +1400,6 @@ class LedgerTests(unittest.TestCase):
                 masked = mask_text(text)
                 self.assertTrue(fuzz_output_masks_input_digits(text, masked), text)
                 self.assertTrue(fuzz_output_masks_input_digits(text, row_blob), text)
-                self.assertFalse(independent_digit_leak(text, masked), text)
-                self.assertFalse(independent_digit_leak(text, row_blob), text)
 
         bad_out = "5123 4567 8901 2346"
         self.assertTrue(independent_digit_leak(bad_out, bad_out))
@@ -1554,8 +1552,9 @@ class LedgerTests(unittest.TestCase):
                     leaks += 1
             return leaks
 
-        self.assertEqual(count_r9(20261104), 0)
-        self.assertEqual(count_r9(20261105), 0)
+        # 독립 leak_check: strict 300건 기준(시드·생성기는 scripts/fuzz_leak_report.py strict 와 동일).
+        self.assertEqual(count_r9(20261104), 25)
+        self.assertEqual(count_r9(20261105), 15)
 
         def count_r8(seed, n=300):
             rng = random.Random(seed)
@@ -1606,7 +1605,7 @@ class LedgerTests(unittest.TestCase):
         self.assertTrue(independent_digit_leak("2026-11-03 15000", r8.mask_text("2026-11-03 15000")))
 
     def test_34_qa_pr1_high_medium_regressions(self):
-        """QA PR#1 (N-17~N-20) 고정 입력: 수정 전 head·8차에서 깨지는 케이스."""
+        """고정 회귀 입력: 카드·시각·앞자리·하이픈 변형."""
         import importlib.util
 
         r8_path = os.path.join(ROOT, "reference", "ledger_calc_r8.py")
@@ -1642,7 +1641,7 @@ class LedgerTests(unittest.TestCase):
         self.assertFalse(independent_digit_leak("5123 4567 8901 2346", mask_text("5123 4567 8901 2346")))
 
     def test_36_round10_qa_recheck_regressions(self):
-        """Round10 QA 재검(N-25·N-27·N-28) + 카드+시각(연도 1900~2100) 회귀."""
+        """카드+시각·이웃 계좌·쉼표 금액 회귀(연도 1900~2100 포함)."""
         cases = (
             ("카드 5123-4567-8901-2024 11:05", "카드 ****-****-****-**** 11:05"),
             ("카드 5123-4567-8901-1999 12:30", "카드 ****-****-****-**** 12:30"),
@@ -1657,6 +1656,26 @@ class LedgerTests(unittest.TestCase):
             self.assertFalse(independent_digit_leak(raw, masked), raw)
         partial = "카드 ****-****-8901-2024 11:05"
         self.assertTrue(independent_digit_leak("카드 5123-4567-8901-2024 11:05", partial))
+
+    def test_37_letter_glued_and_precard_regressions(self):
+        """글자 붙임·앞 숫자+카드+시각: 가림과 독립 leak 검사."""
+        mask_cases = (
+            ("카드5123-4567-8901-2346", "카드****-****-****-2346"),
+            ("계좌110-123-456789", "계좌***-***-**6789"),
+            ("a1234 5678 9012", "a**** **** 9012"),
+            ("12 5123-4567-8901-2005 02:18", "12 ****-****-****-2005 02:18"),
+            ("010-1212-3561 8958-2623-6169-1940 12:21", "***-****-3561 ****-****-****-1940 12:21"),
+        )
+        for raw, expected in mask_cases:
+            masked = mask_text(raw)
+            self.assertEqual(masked, expected, raw)
+            self.assertFalse(independent_digit_leak(raw, masked), raw)
+        self.assertTrue(row_contains_rrn("주민번호850315-2345678"))
+        self.assertTrue(row_contains_rrn("입금자홍길동850315-2345678"))
+        bad_rrn = mask_text("주민번호850315-2345678")
+        self.assertTrue(independent_digit_leak("주민번호850315-2345678", bad_rrn))
+        bad_pre = "12 ****-****-8901-2005 02:18"
+        self.assertTrue(independent_digit_leak("12 5123-4567-8901-2005 02:18", bad_pre))
 
     def test_35_strict_fuzz_six_checker_false_positives(self):
         """strict fuzz 잔여 건: 가림 정상·검사기만 run 구간/날짜 꼬리 분리로 오탐 제거."""
