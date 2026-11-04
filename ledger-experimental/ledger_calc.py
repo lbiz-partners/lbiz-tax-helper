@@ -228,29 +228,38 @@ def is_separator_whitespace(ch):
 
 
 def consume_separator_run(text, pos, end):
-    """공백류와 비공백 구분이 임의 순으로 섞인 연속(비공백 구분만 세며 최대 3)."""
+    """글자·줄바꿈을 제외한 구분(공백 포함)이 이어지면 같은 run."""
     if pos >= end:
         return None
     start = pos
-    nws = 0
-    moved = False
     while pos < end:
         ch = text[pos]
-        if is_separator_whitespace(ch):
-            pos += 1
-            moved = True
-            continue
-        if is_text_separator(ch) and ch not in "\n\r":
-            nws += 1
-            if nws > 3:
-                return None
-            pos += 1
-            moved = True
-            continue
-        break
-    if not moved or pos <= start:
+        if ch.isdigit() or is_text_letter(ch) or ch in "\n\r":
+            break
+        pos += 1
+    return pos if pos > start else None
+
+
+def advance_across_letter_glue(text, pos, end):
+    """라벨 글자 뒤에 붙은 숫자(카드번호1234·no1 등)만 run 에 포함."""
+    if pos >= end or not is_text_letter(text[pos]):
         return None
-    return pos
+    p = pos
+    while p < end and is_text_letter(text[p]):
+        p += 1
+    if p >= end or not text[p].isdigit():
+        return None
+    q = p
+    while q < end and text[q].isdigit():
+        q += 1
+    min_chunk = _min_glued_first_chunk(text, pos, p)
+    if q - p < _min_glued_first_chunk(text, pos, p):
+        if q - p <= 1 and q < end and is_separator_whitespace(text[q]):
+            return None
+        _, _end, _c, digits = _iter_connected_digit_run(text, p, end)
+        if len(digits) < 9:
+            return None
+    return p
 
 
 def build_nfkc_mapping(text):
@@ -326,37 +335,95 @@ def is_complete_date_prefix(chunks, digits):
     return True
 
 
+def _iter_connected_digit_run(text, start_pos, end_bound):
+    """start_pos 의 숫자부터 connected run 한 덩어리."""
+    chunks = []
+    pos = start_pos
+    while True:
+        if pos >= end_bound or not text[pos].isdigit():
+            break
+        d0 = pos
+        while pos < end_bound and text[pos].isdigit():
+            pos += 1
+        chunks.append(pos - d0)
+        if pos >= end_bound:
+            break
+        nxt = consume_separator_run(text, pos, end_bound)
+        if nxt is not None:
+            pos = nxt
+            continue
+        glued = advance_across_letter_glue(text, pos, end_bound)
+        if glued is not None:
+            pos = glued
+            continue
+        break
+    end = pos
+    digits = "".join(c for c in text[start_pos:end] if c.isdigit())
+    return start_pos, end, tuple(chunks), digits
+
+
+def _letter_run_is_latin_label(text, start, end):
+    """영문 라벨(no1 등)만 짧은 붙임 숫자를 run 시작으로 허용."""
+    if start >= end:
+        return False
+    for p in range(start, end):
+        ch = text[p]
+        if not is_text_letter(ch):
+            return False
+        o = ord(ch)
+        if o > 0x7F:
+            return False
+        if 0x41 <= o <= 0x5A or 0x61 <= o <= 0x7A:
+            continue
+        return False
+    return True
+
+
+def _min_glued_first_chunk(text, letter_start, letter_end):
+    if _letter_run_is_latin_label(text, letter_start, letter_end):
+        return 1
+    return 3
+
+
+def digit_run_may_start_at(text, pos):
+    """글자에 붙은 짧은 꼬리 숫자(날짜2 등)는 run 시작점이 아님."""
+    if pos >= len(text) or not text[pos].isdigit():
+        return False
+    if pos > 0 and is_text_letter(text[pos - 1]):
+        j = pos - 1
+        while j >= 0 and is_text_letter(text[j]):
+            j -= 1
+        letter_start = j + 1
+        q = pos
+        while q < len(text) and text[q].isdigit():
+            q += 1
+        if q - pos < _min_glued_first_chunk(text, letter_start, pos):
+            if q - pos <= 1 and q < len(text) and is_separator_whitespace(text[q]):
+                return False
+            _, _end, _c, digits = _iter_connected_digit_run(text, pos, len(text))
+            if len(digits) < 9:
+                return False
+    return True
+
+
 def iter_connected_digit_sequences(text):
-    """숫자 덩어리와 구분 연속(공백 포함)으로 이어진 한 run 을 찾아요."""
+    """숫자 run: 비문자 구분 + letter→digit 붙임으로 이어진 구간."""
     n = len(text)
     i = 0
     while i < n:
-        if not text[i].isdigit():
-            i += 1
+        if text[i].isdigit() and digit_run_may_start_at(text, i):
+            start, end, chunks, digits = _iter_connected_digit_run(text, i, n)
+            yield start, end, chunks, digits
+            i = end if end > start else i + 1
             continue
-        start = i
-        chunks = []
-        pos = i
-        while True:
-            if pos >= n or not text[pos].isdigit():
-                break
-            d0 = pos
-            while pos < n and text[pos].isdigit():
-                pos += 1
-            clen = pos - d0
-            chunks.append(clen)
-            if pos >= n:
-                break
-            nxt = consume_separator_run(text, pos, n)
-            if nxt is None:
-                break
-            pos = nxt
-            if pos >= n or not text[pos].isdigit():
-                break
-        end = pos
-        digits = "".join(c for c in text[start:end] if c.isdigit())
-        yield start, end, tuple(chunks), digits
-        i = end if end > start else start + 1
+        if is_text_letter(text[i]):
+            glued = advance_across_letter_glue(text, i, n)
+            if glued is not None:
+                start, end, chunks, digits = _iter_connected_digit_run(text, glued, n)
+                yield start, end, chunks, digits
+                i = end if end > start else i + 1
+                continue
+        i += 1
 
 
 def sequence_separator_runs(text, start, end, chunks):
@@ -974,96 +1041,12 @@ def mask_sensitive_tail_hi(chunks, digits, n):
 
 
 def iter_mask_spans_in_run(text, start, end, chunks, digits):
-    """9자리 이상 connected run: run 전체에서 끝 4자리만 남기고 가려요(단독 예외 run 제외)."""
-    n = len(chunks)
+    """≥9자리 connected run: run 전체 숫자열의 끝 4자리만 남깁니다(단독 ≤8 예외 run 제외)."""
     if run_is_standalone_keep(text, start, end, chunks, digits):
         return
-    needs = any(c >= 5 for c in chunks) or len(digits) >= 9
-    if not needs:
+    if len(digits) < 9 and not any(c >= 5 for c in chunks):
         return
-
-    lo = 0
-    if n >= 4 and is_date_digit_sequence(chunks[:3], digits[:8]):
-        if run_is_date_plus_short_plain_amount(text, start, end, chunks, digits):
-            return
-        lo = 3
-
-    tail_hi = mask_sensitive_tail_hi(chunks, digits, n)
-    tail_hi = trim_mask_tail_hi(text, start, end, chunks, digits, lo, tail_hi)
-    if tail_hi < lo:
-        return
-
-    if lo == 0:
-        for ci in range(1, n):
-            if sum(chunks[:ci]) > 2:
-                break
-            if is_card_four_chunk_at(chunks, ci):
-                lo = ci
-                break
-
-    rest_has_card = any(is_card_four_chunk_at(chunks, ci) for ci in range(3, n))
-    apply_phone = (
-        n >= 6
-        and run_is_phone_entire_run(chunks[:3], digits[:11], 3)
-        and (not any(chunks[k] >= 4 for k in range(3, n)) or rest_has_card)
-    )
-    if apply_phone:
-        ps0, _ = chunk_char_range(text, start, end, chunks, 0)
-        _, ps1 = chunk_char_range(text, start, end, chunks, 2)
-        yield ps0, ps1, "last4"
-        lo = max(lo, 3)
-        phone_masked = True
-    else:
-        phone_masked = False
-
-    if is_trailing_card_time_not_calendar(chunks, digits):
-        card_tail = n - 3
-        card_tail = trim_mask_tail_hi(text, start, end, chunks, digits, lo, card_tail)
-        if card_tail >= lo:
-            short_pre = lo > 0 and sum(chunks[:lo]) <= 2
-            if phone_masked and lo >= 3:
-                card_mode = "last4"
-            elif short_pre:
-                card_mode = "last4"
-            else:
-                card_mode = "all"
-            s0, _ = chunk_char_range(text, start, end, chunks, lo)
-            _, s1 = chunk_char_range(text, start, end, chunks, card_tail)
-            yield s0, s1, card_mode
-        card_start = None
-        for ci in range(lo, n):
-            if is_card_four_chunk_at(chunks, ci):
-                card_start = ci
-                break
-        if card_start is not None:
-            ci_time = card_start + 4
-            if (
-                ci_time + 2 < n
-                and chunks[ci_time] == 2
-                and chunks[ci_time + 1] == 2
-                and chunks[ci_time + 2] == 2
-                and ci_time + 3 >= n
-            ):
-                ts0, _ = chunk_char_range(text, start, end, chunks, ci_time)
-                _, ts1 = chunk_char_range(text, start, end, chunks, ci_time + 2)
-                yield ts0, ts1, "clock_head"
-            elif ci_time + 1 < len(chunks) and is_valid_clock_hhmm(chunks, digits, ci_time):
-                t_end = ci_time + 1
-                tilde_range = False
-                if t_end + 1 < len(chunks):
-                    _, c5_end = chunk_char_range(text, start, end, chunks, t_end)
-                    c6_start, _ = chunk_char_range(text, start, end, chunks, t_end + 1)
-                    sep = text[c5_end:c6_start]
-                    tilde_range = "~" in sep or "～" in sep
-                if tilde_range:
-                    ts0, _ = chunk_char_range(text, start, end, chunks, ci_time)
-                    _, ts1 = chunk_char_range(text, start, end, chunks, t_end)
-                    yield ts0, ts1, "clock_head_four"
-        return
-
-    s0, _ = chunk_char_range(text, start, end, chunks, lo)
-    _, s1 = chunk_char_range(text, start, end, chunks, tail_hi)
-    yield s0, s1, "last4"
+    yield start, end, "last4"
 
 
 def rrn_chunk_span_is_credible(chunks, digits, i, j):
