@@ -503,8 +503,10 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
         rules = read(RULES)
+        # G2_EXCLUSION_WARNING 고정 문장(법 인용)은 제외: "20% 이상 누락"
+        rules_filtered = re.sub(r"제56조의2 제2항\([^)]+\)", "", rules)
         for pattern in (r"\d\s*%", r"퍼센트", r"\d[\d,]*\s*(?:만|억|천)", r"만\s*원", r"\d[\d,]*\s*원"):
-            self.assertIsNone(re.search(pattern, rules), pattern)
+            self.assertIsNone(re.search(pattern, rules_filtered), pattern)
 
         src = read(PROG)
         self.assertIsNone(re.search(r"^\s*(?:import|from)\s+(?:socket|urllib|http|requests|random|time|secrets|uuid)\b",
@@ -1744,8 +1746,10 @@ class LedgerTests(unittest.TestCase):
     def test_40_no_hardcoded_legal_numbers_in_rules_and_output(self):
         """규칙 파일과 프로그램 출력에 법 기준 숫자(세율·한도 등)가 박혀 있지 않음."""
         rules = read(RULES)
+        # G2_EXCLUSION_WARNING 고정 문장(법 인용)은 제외: "20% 이상 누락"
+        rules_filtered = re.sub(r"제56조의2 제2항\([^)]+\)", "", rules)
         for pattern in (r"(?<!\d)\d{1,2}\s*%", r"\d[\d,]*\s*만\s*원", r"\d[\d,]*\s*억\s*원"):
-            match = re.search(pattern, rules)
+            match = re.search(pattern, rules_filtered)
             self.assertIsNone(match, "규칙 파일에 숫자 패턴 발견: {}".format(pattern))
 
         src = read(PROG)
@@ -1797,6 +1801,8 @@ class LedgerTests(unittest.TestCase):
         """estimate 명령은 값·근거 조문·확인일이 모두 있어야 계산함."""
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "1000000",
+                                 "--business-income", "800000",
+                                 "--total-income", "1000000",
                                  "--rate", "0.5",
                                  "--limit", "2000000")
         self.assertEqual(code, 2)
@@ -1805,6 +1811,8 @@ class LedgerTests(unittest.TestCase):
 
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "1000000",
+                                 "--business-income", "800000",
+                                 "--total-income", "1000000",
                                  "--rate", "0.5",
                                  "--rate-source", "시험용 가짜 조문",
                                  "--limit", "2000000",
@@ -1815,6 +1823,8 @@ class LedgerTests(unittest.TestCase):
 
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "1000000",
+                                 "--business-income", "800000",
+                                 "--total-income", "1000000",
                                  "--rate", "0.5",
                                  "--rate-source", "시험용 가짜 조문",
                                  "--rate-date", "2026-11-03",
@@ -1831,6 +1841,8 @@ class LedgerTests(unittest.TestCase):
 
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "1000000",
+                                 "--business-income", "800000",
+                                 "--total-income", "1000000",
                                  "--rate", "0.5",
                                  "--rate-source", "시험용 가짜 조문",
                                  "--rate-date", "2026-11-03",
@@ -1844,9 +1856,12 @@ class LedgerTests(unittest.TestCase):
         self.assertIn("대상", tail["eligibility_premise"])
 
     def test_44_estimate_calculation_correct(self):
-        """estimate G2 계산이 공식대로 수행됨."""
+        """estimate G2 계산이 공식대로 수행됨: 비율 적용, 한도 적용."""
+        # 비율 적용: 500000 × (800000 / 1000000) × 0.5 = 200000
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "500000",
+                                 "--business-income", "800000",
+                                 "--total-income", "1000000",
                                  "--rate", "0.5",
                                  "--rate-source", "시험용 가짜 조문",
                                  "--rate-date", "2026-11-03",
@@ -1854,10 +1869,14 @@ class LedgerTests(unittest.TestCase):
                                  "--limit-source", "시험용 가짜 조문",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0)
-        self.assertEqual(tail["result"], 250000)
+        self.assertEqual(tail["result"], 200000)  # 500000 * 0.8 * 0.5 = 200000
+        self.assertAlmostEqual(tail["inputs"]["ratio"], 0.8, places=4)
 
+        # 한도 적용: 10000000 × (1000000 / 1000000) × 0.5 = 5000000 > 2000000 → 2000000
         code, stdout, tail = run("estimate", "--topic", "G2",
                                  "--tax-amount", "10000000",
+                                 "--business-income", "1000000",
+                                 "--total-income", "1000000",
                                  "--rate", "0.5",
                                  "--rate-source", "시험용 가짜 조문",
                                  "--rate-date", "2026-11-03",
@@ -1865,7 +1884,7 @@ class LedgerTests(unittest.TestCase):
                                  "--limit-source", "시험용 가짜 조문",
                                  "--limit-date", "2026-11-03")
         self.assertEqual(code, 0)
-        self.assertEqual(tail["result"], 2000000)
+        self.assertEqual(tail["result"], 2000000)  # min(5000000, 2000000)
 
     def test_45_official_calc_terms_banned(self):
         """관공서 공식 결과로 오해할 표현은 lint에서 차단됨."""
@@ -1896,6 +1915,8 @@ class LedgerTests(unittest.TestCase):
         """estimate는 공식이 준비된 주제만 계산함."""
         code, stdout, tail = run("estimate", "--topic", "G1",
                                  "--tax-amount", "1000000",
+                                 "--business-income", "800000",
+                                 "--total-income", "1000000",
                                  "--rate", "0.5",
                                  "--rate-source", "시험용 가짜 조문",
                                  "--rate-date", "2026-11-03",
@@ -1928,6 +1949,57 @@ class LedgerTests(unittest.TestCase):
         for match in rules_example_article:
             if re.search(r'제\d+조', match):
                 self.fail("규칙 파일 명령 예시에 실제 조문번호 발견: {}".format(match))
+
+    def test_48_estimate_refusal_conditions(self):
+        """estimate는 입력값 검증 실패 시 거절함."""
+        base_args = ["estimate", "--topic", "G2",
+                     "--rate", "0.5", "--rate-source", "시험용 가짜 조문", "--rate-date", "2026-11-03",
+                     "--limit", "2000000", "--limit-source", "시험용 가짜 조문", "--limit-date", "2026-11-03"]
+
+        # total_income <= 0
+        code, stdout, tail = run(*base_args,
+                                 "--tax-amount", "1000000",
+                                 "--business-income", "500000",
+                                 "--total-income", "0")
+        self.assertEqual(code, 2)
+        self.assertEqual(tail["status"], "missing_source")
+        self.assertTrue(any("종합소득금액" in e and "0 이하" in e for e in tail["errors"]))
+
+        # business_income < 0
+        code, stdout, tail = run(*base_args,
+                                 "--tax-amount", "1000000",
+                                 "--business-income", "-100",
+                                 "--total-income", "1000000")
+        self.assertEqual(code, 2)
+        self.assertEqual(tail["status"], "missing_source")
+        self.assertTrue(any("사업소득금액" in e and "음수" in e for e in tail["errors"]))
+
+        # business_income > total_income
+        code, stdout, tail = run(*base_args,
+                                 "--tax-amount", "1000000",
+                                 "--business-income", "1500000",
+                                 "--total-income", "1000000")
+        self.assertEqual(code, 2)
+        self.assertEqual(tail["status"], "missing_source")
+        self.assertTrue(any("사업소득금액" in e and "종합소득금액보다 클 수 없" in e for e in tail["errors"]))
+
+    def test_49_estimate_g2_exclusion_warning(self):
+        """estimate G2 결과에 제2항 배제 경고가 포함됨."""
+        G2_EXCLUSION_WARNING = "제56조의2 제2항(소득금액 20% 이상 누락, 장부·증빙 5년 미보관)이면 공제가 적용되지 않을 수 있어요"
+
+        code, stdout, tail = run("estimate", "--topic", "G2",
+                                 "--tax-amount", "1000000",
+                                 "--business-income", "800000",
+                                 "--total-income", "1000000",
+                                 "--rate", "0.5",
+                                 "--rate-source", "시험용 가짜 조문",
+                                 "--rate-date", "2026-11-03",
+                                 "--limit", "2000000",
+                                 "--limit-source", "시험용 가짜 조문",
+                                 "--limit-date", "2026-11-03")
+        self.assertEqual(code, 0)
+        self.assertIn(G2_EXCLUSION_WARNING, stdout)
+        self.assertEqual(tail["g2_exclusion_warning"], G2_EXCLUSION_WARNING)
 
 
 if __name__ == "__main__":

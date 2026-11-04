@@ -23,8 +23,10 @@ description: 사용자님 본인 사업장의 거래를 장부 표·월별 손�
 ### 1-2. 대략적인 금액 계산 (estimate)
 
 - 사용자님이 「대상이다」라고 하셨을 때, 법에 공식이 있는 주제(예: G2 기장세액공제)는 대략적인 금액을 계산해 드릴 수 있어요.
+- G2 기장세액공제 공식: `min(종합소득 산출세액 × (장부 기준 사업소득금액 ÷ 종합소득금액) × 공제율, 한도)`. 사용자님이 종합소득 산출세액·장부 기준 사업소득금액·종합소득금액을 넣고, 공제율·한도는 법제처 원문을 확인한 값과 출처·확인일을 함께 넘겨요.
 - 계산에 필요한 세율·한도 값은 **같은 대화 안에서 법제처 원문을 열어 확인한 값**만 쓸 수 있어요. 값과 함께 근거 조문·확인일을 반드시 넘겨요. 값이나 출처·확인일이 하나라도 빠지면 계산을 거부하고 「[확인 필요]」로 둬요.
 - 모든 계산 결과에는 반드시 「엘비즈 계산기로 낸 대략적인 금액이며 홈택스와 다를 수 있어요. 실제로 하실 때는 세무사와 직접 확인하세요.」 문장을 붙여요.
+- G2 결과에는 「제56조의2 제2항(소득금액 20% 이상 누락, 장부·증빙 5년 미보관)이면 공제가 적용되지 않을 수 있어요」 문장도 붙여요.
 - 대상 여부 판단은 하지 않아요. 「대상이라고 하셨을 때만 계산했어요」를 결과에 밝혀요.
 - 신고서 작성·홈택스 제출은 여전히 하지 않아요.
 
@@ -170,7 +172,10 @@ python3 ledger_calc.py topic --id G2
 python3 ledger_calc.py guard --text "이걸로 신고해도 돼요?"
 python3 ledger_calc.py lint --file 검사할파일.md
 python3 ledger_calc.py list-drafts --dir 장부초안
-python3 ledger_calc.py estimate --topic G2 --tax-amount <산출세액> \
+python3 ledger_calc.py estimate --topic G2 \
+    --tax-amount <종합소득 산출세액> \
+    --business-income <장부 기준 사업소득금액> \
+    --total-income <종합소득금액> \
     --rate <법제처에서 확인한 공제율> --rate-source "<확인한 조문>" --rate-date <확인일> \
     --limit <법제처에서 확인한 한도> --limit-source "<확인한 조문>" --limit-date <확인일>
 ```
@@ -189,4 +194,4 @@ python3 -m unittest -v tests.test_ledger
 
 ## 7. 기준 해시
 
-`ledger_calc.py` sha256: `b6203abeb14fc3f9c7e8aa87a0b80da88cc0febe80c2cff820e96f9ac6af6b67`
+`ledger_calc.py` sha256: `09fb2955e25299c23dda7022f941852015acfc20b7d1c2fcb4f5530f873a29c8`

@@ -1665,11 +1665,12 @@ def cmd_list_drafts(args):
 ESTIMABLE_TOPICS = {
     "G2": {
         "name": "기장세액공제",
-        "formula": "min(산출세액 * 공제율, 한도)",
-        "inputs": ["산출세액", "공제율", "한도"],
+        "formula": "min(종합소득 산출세액 × (장부 기준 사업소득금액 ÷ 종합소득금액) × 공제율, 한도)",
+        "inputs": ["종합소득 산출세액", "장부 기준 사업소득금액", "종합소득금액", "공제율", "한도"],
         "basis": "소득세법 제56조의2",
     },
 }
+G2_EXCLUSION_WARNING = "제56조의2 제2항(소득금액 20% 이상 누락, 장부·증빙 5년 미보관)이면 공제가 적용되지 않을 수 있어요"
 
 
 def validate_estimate_input(name, value, source_article, check_date):
@@ -1697,6 +1698,8 @@ def cmd_estimate(args):
 
     if topic_id == "G2":
         tax_amount = args.tax_amount
+        business_income = args.business_income
+        total_income = args.total_income
         rate = args.rate
         limit = args.limit
         rate_source = args.rate_source
@@ -1707,7 +1710,17 @@ def cmd_estimate(args):
         errors = []
 
         if tax_amount is None or tax_amount < 0:
-            errors.append("산출세액이 없거나 음수예요.")
+            errors.append("종합소득 산출세액이 없거나 음수예요.")
+
+        if business_income is None or business_income < 0:
+            errors.append("장부 기준 사업소득금액이 없거나 음수예요.")
+
+        if total_income is None or total_income <= 0:
+            errors.append("종합소득금액이 없거나 0 이하예요.")
+
+        if business_income is not None and total_income is not None:
+            if business_income > total_income:
+                errors.append("장부 기준 사업소득금액이 종합소득금액보다 클 수 없어요.")
 
         ok, err = validate_estimate_input("공제율", rate, rate_source, rate_date)
         if not ok:
@@ -1730,18 +1743,24 @@ def cmd_estimate(args):
             print("입력 오류: 한도는 0 이상이어야 해요.")
             return finish("input_error", 2)
 
-        raw_deduction = tax_amount * rate
+        ratio = business_income / total_income
+        raw_deduction = tax_amount * ratio * rate
         deduction = min(raw_deduction, limit)
         deduction_int = int(deduction)
 
         print("[{} {}] 대략적인 계산 결과".format(topic_id, topic["name"]))
         print("- 공식: {}".format(topic["formula"]))
         print("- 입력값:")
-        print("  - 산출세액: {:,}원 (사용자님 입력)".format(tax_amount))
+        print("  - 종합소득 산출세액: {:,}원 (사용자님 입력)".format(tax_amount))
+        print("  - 장부 기준 사업소득금액: {:,}원 (사용자님 입력)".format(business_income))
+        print("  - 종합소득금액: {:,}원 (사용자님 입력)".format(total_income))
+        print("  - 비율 (사업소득금액 ÷ 종합소득금액): {:.4f}".format(ratio))
         print("  - 공제율: {} (근거: {}, 확인일: {})".format(rate, rate_source, rate_date))
         print("  - 한도: {:,}원 (근거: {}, 확인일: {})".format(limit, limit_source, limit_date))
-        print("- 계산: min({:,} × {}, {:,}) = {:,}원".format(tax_amount, rate, limit, deduction_int))
+        print("- 계산: min({:,} × {:.4f} × {}, {:,}) = {:,}원".format(
+            tax_amount, ratio, rate, limit, deduction_int))
         print("")
+        print(G2_EXCLUSION_WARNING)
         print(ELIGIBILITY_PREMISE)
         print(LBIZ_CALC_DISCLAIMER)
         print(DISCLAIMER)
@@ -1752,6 +1771,9 @@ def cmd_estimate(args):
             "formula": topic["formula"],
             "inputs": {
                 "tax_amount": tax_amount,
+                "business_income": business_income,
+                "total_income": total_income,
+                "ratio": ratio,
                 "rate": rate,
                 "rate_source": rate_source,
                 "rate_date": rate_date,
@@ -1759,6 +1781,7 @@ def cmd_estimate(args):
                 "limit_source": limit_source,
                 "limit_date": limit_date,
             },
+            "g2_exclusion_warning": G2_EXCLUSION_WARNING,
             "eligibility_premise": ELIGIBILITY_PREMISE,
             "lbiz_calc_disclaimer": LBIZ_CALC_DISCLAIMER,
         })
@@ -1801,7 +1824,9 @@ def build_parser():
 
     p = sub.add_parser("estimate", help="법제처 확인 값으로 대략적인 금액 계산 (대상이라고 하셨을 때만)")
     p.add_argument("--topic", required=True, help="주제 번호(예: G2)")
-    p.add_argument("--tax-amount", type=int, help="[G2] 산출세액 (원)")
+    p.add_argument("--tax-amount", type=int, help="[G2] 종합소득 산출세액 (원)")
+    p.add_argument("--business-income", type=int, help="[G2] 장부 기준 사업소득금액 (원)")
+    p.add_argument("--total-income", type=int, help="[G2] 종합소득금액 (원)")
     p.add_argument("--rate", type=float, help="[G2] 공제율 (법제처 원문에서 확인한 값)")
     p.add_argument("--rate-source", help="[G2] 공제율 근거 조문 (법제처 원문 조문명)")
     p.add_argument("--rate-date", help="[G2] 공제율 확인일 (YYYY-MM-DD)")
