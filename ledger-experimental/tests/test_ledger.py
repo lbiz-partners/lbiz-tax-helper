@@ -1493,13 +1493,19 @@ class LedgerTests(unittest.TestCase):
             "259,918 130-851-557966",
             "010-1234-5678 5123-4567-8901-2346",
             "5123-4567-8901-2346 1,500,000원",
+            "1234 5123-4567-8901-2346",
+            "카드 1234-5123-4567-8901-2346",
+            "계좌12-34-5678-9012",
+            "no1-2-3-4-5-6-7-8-9",
+            "1234567 5123-4567-8901-2346 7654321",
+            "1709 1556–2039–0749–6432",
         )
         for raw in must_mask:
             masked = mask_text(raw)
             self.assertNotEqual(masked, raw, raw)
             self.assertFalse(independent_digit_leak(raw, masked), raw)
 
-    def test_33_round8_baseline_leak_count(self):
+    def test_33_independent_leak_fuzz_count(self):
         import importlib.util
         import random
 
@@ -1553,8 +1559,8 @@ class LedgerTests(unittest.TestCase):
             return leaks
 
         # 독립 leak_check: strict 300건 기준(시드·생성기는 scripts/fuzz_leak_report.py strict 와 동일).
-        self.assertEqual(count_r9(20261104), 25)
-        self.assertEqual(count_r9(20261105), 15)
+        self.assertEqual(count_r9(20261104), 0)
+        self.assertEqual(count_r9(20261105), 0)
 
         def count_r8(seed, n=300):
             rng = random.Random(seed)

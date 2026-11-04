@@ -163,6 +163,17 @@ SENSITIVE_CHUNK_PATTERNS = frozenset(
     ((4, 4, 4, 4), (4, 6, 5), (4, 4, 4, 3), (3, 3, 6), (3, 2, 6))
 )
 PHONE_LIKE_RE = re.compile(r"^0\d{9,10}$")
+
+
+def phone_digits_credible(digits):
+    if not PHONE_LIKE_RE.match(digits):
+        return False
+    if len(digits) >= 3 and digits[:3] in ("010", "011", "016", "017", "018", "019"):
+        return True
+    if len(digits) >= 2 and digits[:2] in PHONE_AREA2:
+        return True
+    return False
+
 PHONE_AREA2 = frozenset(("02", "31", "32", "33", "41", "42", "43", "44", "51", "52", "53", "54", "55", "61", "62", "63", "64"))
 AMOUNT_RE = re.compile(r"^(?:\d{1,3}(?:,\d{3})+|\d+)$")
 DATE_RE = re.compile(r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$")
@@ -333,14 +344,11 @@ def iter_connected_digit_sequences(text):
             while pos < n and text[pos].isdigit():
                 pos += 1
             clen = pos - d0
-            letter_before = d0 > 0 and is_text_letter(text[d0 - 1])
             chunks.append(clen)
             if pos >= n:
                 break
             nxt = consume_separator_run(text, pos, n)
             if nxt is None:
-                break
-            if letter_before and clen <= 2:
                 break
             pos = nxt
             if pos >= n or not text[pos].isdigit():
@@ -723,13 +731,27 @@ def run_is_only_dates(chunks, digits):
     return i == n and n > 0
 
 
+def run_is_standalone_business_reg(text, start, end, chunks, digits):
+    if chunks != (3, 2, 5) or len(digits) != 10:
+        return False
+    ok_sep = set("-–—\u2010\u2212\u3161\u1173.\u00b7 \u00a0")
+    for run in sequence_separator_runs(text, start, end, chunks):
+        if not run:
+            return False
+        if any(ch in ",;" for ch in run):
+            return False
+        if not all(ch in ok_sep for ch in run):
+            return False
+    return True
+
+
 def run_is_phone_entire_run(chunks, digits, n):
     if n == 3 and chunks[0] == 3 and chunks[1] == 4 and chunks[2] == 4:
-        return PHONE_LIKE_RE.match(digits)
-    if n == 3 and chunks[1] == 4 and chunks[2] == 4 and chunks[0] in (2, 3):
-        return len(digits) >= 2 and digits[:2] in PHONE_AREA2 and PHONE_LIKE_RE.match(digits)
+        return phone_digits_credible(digits)
+    if n == 3 and chunks == (2, 4, 4) and digits[:2] == "02":
+        return phone_digits_credible(digits)
     if n == 2 and chunks[0] == 3 and chunks[1] == 4:
-        return PHONE_LIKE_RE.match(digits[:7])
+        return phone_digits_credible(digits[:7])
     return False
 
 
@@ -786,7 +808,7 @@ def run_is_standalone_keep(text, start, end, chunks, digits):
     if n == 3 and total == 8 and is_date_digit_sequence(chunks, digits):
         return True
 
-    if n == 3 and is_business_digit_sequence(chunks) and total == 10:
+    if run_is_standalone_business_reg(text, start, end, chunks, digits):
         return True
 
     if run_is_phone_entire_run(chunks, digits, n):
@@ -850,15 +872,55 @@ def is_card_four_chunk_at(chunks, i):
 
 
 def iter_card_four_chunk_starts(chunks):
-    """겹치지 않게 4-4-4-4 카드 덩어리 시작 인덱스만."""
+    """4-4-4-4 카드 덩어리가 시작하는 모든 오프셋."""
     n = len(chunks)
-    i = 0
-    while i + 3 < n:
+    for i in range(n):
         if is_card_four_chunk_at(chunks, i):
             yield i
-            i += 4
-        else:
-            i += 1
+
+
+def mask_sensitive_lo_in_run(chunks, digits, n):
+    """가릴 구간의 첫 chunk 인덱스(앞쪽 날짜·전화 예외는 유지)."""
+    if n >= 4 and is_date_digit_sequence(chunks[:3], digits[:8]):
+        return 3
+    if n > 3 and run_is_phone_entire_run(chunks[:3], digits[:11], 3):
+        return 3
+    for ci in range(n):
+        if not is_card_four_chunk_at(chunks, ci):
+            continue
+        if 0 < ci <= 2 and sum(chunks[:ci]) <= 2:
+            return ci
+        break
+    return 0
+
+
+def trim_mask_tail_hi(text, start, end, chunks, digits, lo, tail_hi):
+    """끝쪽 쉼표 금액·단위 접미사는 가리지 않아요."""
+    n = len(chunks)
+    for i in range(lo, n):
+        c0, _ = chunk_char_range(text, start, end, chunks, i)
+        if try_comma_amount_end(text, c0, end) == end and i > lo:
+            if i > 0 and chunks[i - 1] >= 5:
+                continue
+            tail_hi = min(tail_hi, i - 1)
+            break
+    while tail_hi > lo:
+        c0, c1 = chunk_char_range(text, start, end, chunks, tail_hi)
+        if has_unit_suffix_immediately(text, c1, end):
+            tail_hi -= 1
+            continue
+        break
+    return tail_hi
+
+
+def mask_sensitive_tail_hi(chunks, digits, n):
+    """가릴 구간의 마지막 chunk 인덱스(끝 시각·달력 꼬리는 유지)."""
+    if is_trailing_card_time_not_calendar(chunks):
+        if n >= 2 and chunks[-2] == 2 and chunks[-1] == 2:
+            return n - 3
+    if n >= 3 and is_trailing_calendar_date(chunks, digits):
+        return n - 4
+    return n - 1
 
 
 def iter_mask_spans_in_run(text, start, end, chunks, digits):
@@ -870,106 +932,80 @@ def iter_mask_spans_in_run(text, start, end, chunks, digits):
     if not needs:
         return
 
-    card_starts = list(iter_card_four_chunk_starts(chunks))
-    if card_starts:
-        for ci in card_starts:
-            s0, _ = chunk_char_range(text, start, end, chunks, ci)
-            _, s1 = chunk_char_range(text, start, end, chunks, ci + 3)
-            hide_all = (
-                ci == 0
-                and ci + 5 < n
-                and chunks[ci + 4] == 2
-                and chunks[ci + 5] == 2
-            )
-            yield s0, s1, "all" if hide_all else "last4"
-            if hide_all and ci + 4 < n:
-                tail = ci + 4
-                if tail + 3 < n and all(chunks[tail + k] == 2 for k in range(4)):
-                    _, mid = chunk_char_range(text, start, end, chunks, tail + 1)
-                    if mid < end and text[mid] in "~\u301c\uff5e":
-                        tc0, _ = chunk_char_range(text, start, end, chunks, tail)
-                        _, tc1 = chunk_char_range(text, start, end, chunks, tail + 1)
-                        yield tc0, tc1, "all"
-                elif tail + 2 < n and chunks[tail] == 2 and chunks[tail + 1] == 2 and chunks[tail + 2] == 2:
-                    tc0, _ = chunk_char_range(text, start, end, chunks, tail)
-                    _, tc1 = chunk_char_range(text, start, end, chunks, n - 1)
-                    yield tc0, tc1, "clock_head"
-                elif tail + 1 < n and chunks[tail] == 2 and chunks[tail + 1] == 2:
-                    _, mid = chunk_char_range(text, start, end, chunks, tail + 1)
-                    if mid < end and text[mid] in "~\u301c\uff5e":
-                        tc0, _ = chunk_char_range(text, start, end, chunks, tail)
-                        _, tc1 = chunk_char_range(text, start, end, chunks, tail + 1)
-                        yield tc0, tc1, "all"
-        if card_starts[0] > 0:
-            pre = card_starts[0] - 1
-            if any(chunks[k] >= 5 for k in range(pre + 1)) or sum(chunks[: card_starts[0]]) >= 9:
-                s0, _ = chunk_char_range(text, start, end, chunks, 0)
-                _, s1 = chunk_char_range(text, start, end, chunks, pre)
-                yield s0, s1, "last4"
-        covered = [False] * n
-        for ci in card_starts:
-            for j in range(ci, ci + 4):
-                covered[j] = True
-        tail_hi = n - 1
-        if n >= 3 and is_trailing_calendar_date(chunks, digits):
-            tail_hi = n - 4
-        elif n >= 2 and chunks[-2] == 2 and chunks[-1] == 2:
-            tail_hi = n - 3
-        u0 = next((i for i in range(n) if not covered[i]), n)
-        for i in range(u0, tail_hi + 1):
-            if covered[i]:
-                continue
-            if i + 2 < n and is_business_digit_sequence(chunks[i : i + 3]):
-                s0, _ = chunk_char_range(text, start, end, chunks, i)
-                _, s1 = chunk_char_range(text, start, end, chunks, i + 2)
-                yield s0, s1, "last4"
-                break
-            if chunks[i] >= 5:
-                s0, _ = chunk_char_range(text, start, end, chunks, i)
-                _, s1 = chunk_char_range(text, start, end, chunks, i)
-                yield s0, s1, "last4"
-                break
-            tail_chunks = [j for j in range(i, tail_hi + 1) if not covered[j]]
-            if tail_chunks and sum(chunks[j] for j in tail_chunks) >= 9:
-                s0, _ = chunk_char_range(text, start, end, chunks, tail_chunks[0])
-                _, s1 = chunk_char_range(text, start, end, chunks, tail_chunks[-1])
-                yield s0, s1, "last4"
-                break
+    lo = mask_sensitive_lo_in_run(chunks, digits, n)
+    if lo >= n:
+        return
+    if lo == 3 and n >= 4 and is_date_digit_sequence(chunks[:3], digits[:8]):
+        if run_is_date_plus_short_plain_amount(text, start, end, chunks, digits):
+            return
+
+    tail_hi = mask_sensitive_tail_hi(chunks, digits, n)
+    tail_hi = trim_mask_tail_hi(text, start, end, chunks, digits, lo, tail_hi)
+    if tail_hi < lo:
         return
 
-    if n >= 7 and is_trailing_calendar_date(chunks, digits):
-        body_n = n - 3
-        if body_n >= 1 and (any(chunks[i] >= 5 for i in range(body_n)) or sum(chunks[:body_n]) >= 9):
-            s0, _ = chunk_char_range(text, start, end, chunks, 0)
-            _, s1 = chunk_char_range(text, start, end, chunks, body_n - 1)
-            yield s0, s1, "last4"
+    for ci in range(lo, n):
+        if not is_card_four_chunk_at(chunks, ci):
+            continue
+        if ci + 5 < n and chunks[ci + 4] == 2 and chunks[ci + 5] == 2:
+            if ci > lo:
+                ps0, _ = chunk_char_range(text, start, end, chunks, lo)
+                _, ps1 = chunk_char_range(text, start, end, chunks, ci - 1)
+                yield ps0, ps1, "last4"
+            s0, _ = chunk_char_range(text, start, end, chunks, ci)
+            _, s1 = chunk_char_range(text, start, end, chunks, ci + 3)
+            short_pre = 0 < ci <= 2 and sum(chunks[:ci]) <= 2
+            yield s0, s1, "last4" if short_pre else "all"
             return
-    if n >= 4 and is_date_digit_sequence(chunks[:3], digits[:8]):
-        if not run_is_date_plus_short_plain_amount(text, start, end, chunks, digits):
-            s0, _ = chunk_char_range(text, start, end, chunks, 3)
-            _, s1 = chunk_char_range(text, start, end, chunks, n - 1)
-            yield s0, s1, "last4"
-            return
-    s0, _ = chunk_char_range(text, start, end, chunks, 0)
-    _, s1 = chunk_char_range(text, start, end, chunks, n - 1)
+
+    s0, _ = chunk_char_range(text, start, end, chunks, lo)
+    _, s1 = chunk_char_range(text, start, end, chunks, tail_hi)
     yield s0, s1, "last4"
 
 
-def connected_run_contains_rrn(chunks, digits):
+def rrn_chunk_span_is_credible(chunks, digits, i, j):
+    """긴 계좌 run 안의 (6,7) 우연 일치는 제외."""
+    sub_c = chunks[i:j]
+    if len(sub_c) == 1 and sub_c[0] == 13:
+        return True
+    if len(sub_c) != 2 or sub_c != (6, 7):
+        return False
+    if i == 0:
+        return True
+    if i >= 3 and run_is_phone_entire_run(chunks[:i], digits[: sum(chunks[:i])], i):
+        return True
+    if sum(chunks[:i]) > 10:
+        return False
+    if any(chunks[k] >= 6 for k in range(i)):
+        if i >= 2 and chunks[i - 1] >= 6:
+            return False
+    return True
+
+
+def iter_rrn_chunk_spans(chunks, digits):
     n = len(chunks)
     for i in range(n):
         for j in range(i + 1, n + 1):
             sub_c = chunks[i:j]
             sub_d = digit_substring(chunks, digits, i, j)
-            if is_rrn_digit_pattern(sub_c, sub_d):
-                return True
+            if is_rrn_digit_pattern(sub_c, sub_d) and rrn_chunk_span_is_credible(chunks, digits, i, j):
+                yield i, j
+
+
+def connected_run_should_skip_mask(chunks, digits):
+    """주민등록번호가 run 안에 있으면 부분 가림하지 않아요(행 제외는 row_contains_rrn)."""
+    for i, j in iter_rrn_chunk_spans(chunks, digits):
+        sub_c = chunks[i:j]
+        if len(sub_c) == 2 and sub_c == (6, 7) and i >= 2 and sum(chunks[:i]) >= 8:
+            continue
+        return True
     return False
 
 
 def mask_spans_for_text(norm):
     spans = []
     for start, end, chunks, digits in iter_connected_digit_sequences(norm):
-        if connected_run_contains_rrn(chunks, digits):
+        if connected_run_should_skip_mask(chunks, digits):
             continue
         for item in iter_mask_spans_in_run(norm, start, end, chunks, digits):
             spans.append(item)
@@ -1094,7 +1130,7 @@ def looks_like_yymmdd(six):
 def row_contains_rrn(row_text):
     row_text, _ = build_nfkc_mapping(row_text)
     for _start, _end, chunks, digits in iter_connected_digit_sequences(row_text):
-        if connected_run_contains_rrn(chunks, digits):
+        for _i, _j in iter_rrn_chunk_spans(chunks, digits):
             return True
     return False
 

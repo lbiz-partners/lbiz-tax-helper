@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""가림 결과 노출 검사 — ledger_calc 를 import 하지 않고, 원문 숫자 위치만 봅니다.
+"""가림 결과 노출 검사 — ledger_calc 를 import 하지 않습니다.
 
-민감 숫자 덩어리마다 출력에 그 끝 4자리를 넘는 숫자가 보이면 True.
-주민등록번호 꼴은 한 자리라도 보이면 True(제외되지 않은 행 기준).
+연결된 숫자 run 마다 원문 숫자 위치를 모아, 가려진 출력에서 그중 4개를 넘어
+숫자로 남으면 누출입니다. 주민등록번호 꼴은 한 자리라도 보이면 누출입니다.
+(제품 keep 규칙과 무관한 위치 기준 판정)
 """
 
 import datetime
@@ -68,14 +69,11 @@ def iter_connected_runs(text):
             while pos < n and text[pos].isdigit():
                 pos += 1
             clen = pos - d0
-            letter_before = d0 > 0 and _is_letter(text[d0 - 1])
             chunks.append(clen)
             if pos >= n:
                 break
             nxt = _consume_sep(text, pos, n)
             if nxt is None:
-                break
-            if letter_before and clen <= 2:
                 break
             pos = nxt
             if pos >= n or not text[pos].isdigit():
@@ -84,22 +82,6 @@ def iter_connected_runs(text):
         digits = "".join(c for c in text[start:end] if c.isdigit())
         yield start, end, tuple(chunks), digits
         i = end if end > start else start + 1
-
-
-def _chunk_ranges(text, start, end, chunks):
-    pos = start
-    ranges = []
-    for clen in chunks:
-        c0, c1 = pos, pos + clen
-        ranges.append((c0, c1))
-        pos = c1
-        if pos >= end:
-            break
-        nxt = _consume_sep(text, pos, end)
-        if nxt is None:
-            break
-        pos = nxt
-    return ranges
 
 
 def _looks_yymmdd(six):
@@ -134,64 +116,6 @@ def _valid_date8(d8):
         return True
     except ValueError:
         return False
-
-
-def _is_card_four_at(chunks, i):
-    if i + 3 >= len(chunks):
-        return False
-    if not all(chunks[i + k] == 4 for k in range(4)):
-        return False
-    if i >= 1 and chunks[i - 1] == 3 and chunks[i] == 4:
-        return False
-    if i >= 1 and chunks[0] == 3 and chunks[1] == 4 and i < 3:
-        return False
-    return True
-
-
-def _iter_card_starts(chunks):
-    i = 0
-    n = len(chunks)
-    while i + 3 < n:
-        if _is_card_four_at(chunks, i):
-            yield i
-            i += 4
-        else:
-            i += 1
-
-
-def _digit_positions_in_span(text, c0, c1):
-    return [p for p in range(c0, c1) if p < len(text) and text[p].isdigit()]
-
-
-def _leak_on_positions(norm_o, norm_m, positions):
-    if not positions:
-        return False
-    orig = [norm_o[p] for p in positions]
-    n = len(orig)
-    if n <= 4:
-        return False
-    body = "".join(orig[:-4])
-    visible = []
-    for k, p in enumerate(positions):
-        if p < len(norm_m) and norm_m[p].isdigit():
-            visible.append((k, norm_m[p]))
-    if not visible:
-        return False
-    if len(visible) > 4:
-        return True
-    for k, _ in visible:
-        if k < n - 4:
-            return True
-    vis_s = "".join(d for _, d in visible)
-    if len(body) >= 8:
-        for i in range(len(body) - 7):
-            if body[i : i + 8] in vis_s:
-                return True
-    for i in range(len(body)):
-        for w in range(5, len(body) - i + 1):
-            if body[i : i + w] in vis_s:
-                return True
-    return False
 
 
 def _run_is_only_clock(chunks):
@@ -238,14 +162,53 @@ def _try_comma_amount_end(text, start, end):
 def _run_is_comma_amount_only(text, start, end, chunks):
     if len(chunks) < 2:
         return False
-    c0 = _chunk_ranges(text, start, end, chunks)[0][0]
+    pos = start
+    for clen in chunks:
+        pos += clen
+        if pos >= end:
+            break
+        nxt = _consume_sep(text, pos, end)
+        if nxt is None:
+            break
+        pos = nxt
+    c0 = start
     ce = _try_comma_amount_end(text, c0, end)
     if ce is None or ce < end:
         return False
     return True
 
 
-def _drop_trailing_calendar_clock_positions(text, start, end, chunks, digits, positions):
+def _run_is_date_plus_plain_tail(chunks, digits):
+    if len(chunks) < 4:
+        return False
+    if not (chunks[0] == 4 and chunks[1] in (1, 2) and chunks[2] in (1, 2)):
+        return False
+    if not _valid_date8(digits[:8]):
+        return False
+    rest = chunks[3:]
+    rest_d = digits[8:]
+    if len(rest) == 1 and len(rest_d) <= 8 and rest[0] <= 7:
+        return True
+    return False
+
+
+def _chunk_ranges(text, start, end, chunks):
+    pos = start
+    ranges = []
+    for clen in chunks:
+        c0, c1 = pos, pos + clen
+        ranges.append((c0, c1))
+        pos = c1
+        if pos >= end:
+            break
+        nxt = _consume_sep(text, pos, end)
+        if nxt is None:
+            break
+        pos = nxt
+    return ranges
+
+
+def _positions_minus_trailing_keep(text, start, end, chunks, digits, positions):
     n = len(chunks)
     drop = set()
     cr = _chunk_ranges(text, start, end, chunks)
@@ -263,85 +226,20 @@ def _drop_trailing_calendar_clock_positions(text, start, end, chunks, digits, po
     return [p for p in positions if p not in drop]
 
 
-def _drop_leading_clock_positions(text, start, end, chunks, positions):
-    if len(chunks) >= 2 and chunks[0] == 2 and chunks[1] == 2:
-        cr = _chunk_ranges(text, start, end, chunks)
-        c0, c1 = cr[0][0], cr[1][1]
-        drop = {p for p in range(c0, c1) if text[p].isdigit()}
-        return [p for p in positions if p not in drop]
-    return positions
-
-
-def _drop_leading_calendar_positions(text, start, end, chunks, digits, positions):
-    drop = set()
-    cr = _chunk_ranges(text, start, end, chunks)
-    if len(chunks) >= 3 and chunks[0] == 4 and chunks[1] in (1, 2) and chunks[2] in (1, 2):
-        if _valid_date8(digits[:8]):
-            c0, c1 = cr[0][0], cr[2][1]
-            for p in range(c0, c1):
-                if text[p].isdigit():
-                    drop.add(p)
-    elif chunks and chunks[0] == 8 and _valid_date8(digits[:8]):
-        c0, c1 = cr[0]
-        for p in range(c0, c1):
-            if text[p].isdigit():
-                drop.add(p)
-    return [p for p in positions if p not in drop]
-
-
-def _sensitive_units_in_run(text, start, end, chunks, digits):
-    n = len(chunks)
-    cr = _chunk_ranges(text, start, end, chunks)
-    if _is_rrn_chunks(chunks, digits):
-        pos = []
-        for c0, c1 in cr:
-            pos.extend(_digit_positions_in_span(text, c0, c1))
-        yield pos
-        return
-    if _run_is_only_clock(chunks) or _run_is_only_calendar(chunks, digits):
-        return
+def _run_is_public_exception(text, start, end, chunks, digits):
+    if _run_is_only_clock(chunks):
+        return True
+    if _run_is_only_calendar(chunks, digits):
+        return True
     if _run_is_business_only(chunks):
-        return
+        return True
     if _run_is_comma_amount_only(text, start, end, chunks):
-        return
-    if all(c <= 2 for c in chunks):
-        return
-    if sum(chunks) < 9 and not any(c >= 5 for c in chunks):
-        return
-
-    covered = [False] * n
-    for ci in _iter_card_starts(chunks):
-        for j in range(ci, ci + 4):
-            covered[j] = True
-        c0 = cr[ci][0]
-        c1 = cr[ci + 3][1]
-        yield _digit_positions_in_span(text, c0, c1)
-
-    rem_pos = []
-    rem_digits = 0
-    text_end = len(text)
-    for i in range(n):
-        if covered[i]:
-            continue
-        c0, c1 = cr[i]
-        if _try_comma_amount_end(text, c0, text_end) == c1 or (
-            _try_comma_amount_end(text, c0, text_end) is not None
-            and c0 == cr[i][0]
-        ):
-            ce = _try_comma_amount_end(text, c0, text_end)
-            if ce is not None and ce >= c1:
-                continue
-        rem_digits += chunks[i]
-        rem_pos.extend(_digit_positions_in_span(text, c0, c1))
-    if rem_pos and (
-        rem_digits >= 9
-        or any(chunks[i] >= 5 for i in range(n) if not covered[i])
-    ):
-        rem_pos = _drop_trailing_calendar_clock_positions(text, start, end, chunks, digits, rem_pos)
-        rem_pos = _drop_leading_calendar_positions(text, start, end, chunks, digits, rem_pos)
-        rem_pos = _drop_leading_clock_positions(text, start, end, chunks, rem_pos)
-        if rem_pos and len(rem_pos) > 4:
-            yield rem_pos
+        return True
+    if _run_is_date_plus_plain_tail(chunks, digits):
+        return True
+    if chunks and all(c <= 2 for c in chunks) and sum(chunks) < 9:
+        return True
+    return False
 
 
 def _contiguous_digit_strings(text):
@@ -358,6 +256,14 @@ def _contiguous_digit_strings(text):
         i = j
 
 
+def _leak_visible_digit_count(norm_o, norm_m, positions):
+    return sum(
+        1
+        for p in positions
+        if p < len(norm_m) and norm_o[p].isdigit() and norm_m[p].isdigit()
+    )
+
+
 def independent_digit_leak(original, masked_output):
     norm_o = _nfkc(original)
     norm_m = _nfkc(masked_output)
@@ -366,13 +272,28 @@ def independent_digit_leak(original, masked_output):
         if len(run) >= 5 and run in norm_m:
             return True
 
+    if len(norm_o) != len(norm_m):
+        return True
+
     for start, end, chunks, digits in iter_connected_runs(norm_o):
         if _is_rrn_chunks(chunks, digits):
             for p in range(start, end):
-                if norm_o[p].isdigit() and p < len(norm_m) and norm_m[p].isdigit():
+                if norm_o[p].isdigit() and norm_m[p].isdigit():
                     return True
             continue
-        for unit_pos in _sensitive_units_in_run(norm_o, start, end, chunks, digits):
-            if _leak_on_positions(norm_o, norm_m, unit_pos):
+        if _run_is_public_exception(norm_o, start, end, chunks, digits):
+            continue
+        if sum(chunks) < 9 and not any(c >= 5 for c in chunks):
+            continue
+
+        positions = [p for p in range(start, end) if norm_o[p].isdigit()]
+        positions = _positions_minus_trailing_keep(norm_o, start, end, chunks, digits, positions)
+        if len(positions) <= 4:
+            continue
+        visible = _leak_visible_digit_count(norm_o, norm_m, positions)
+        if visible > 4:
+            return True
+        for k, p in enumerate(positions):
+            if k < len(positions) - 4 and norm_m[p].isdigit():
                 return True
     return False
