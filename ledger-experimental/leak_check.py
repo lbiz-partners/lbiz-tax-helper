@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """가림 결과 노출 검사 — ledger_calc 를 import 하지 않습니다.
 
-연결 run 마다 「감사 구간」 숫자 위치만 보고, 그중 4개를 넘어 숫자로 남으면 누출.
+연결 run(숫자 덩어리 + 비문자 구분)마다 감사할 숫자 위치만 보고,
+9자리 이상 run 에서는 끝 4자리 밖에 숫자가 보이면 누출.
 주민등록번호 꼴은 한 자리라도 보이면 누출(행 제외는 row_contains_rrn).
 """
 
@@ -9,7 +10,6 @@ import datetime
 import re
 import unicodedata
 
-_MAX_SEP = 3
 PHONE_AREA2 = frozenset(
     ("02", "31", "32", "33", "41", "42", "43", "44", "51", "52", "53", "54", "55", "61", "62", "63", "64")
 )
@@ -29,36 +29,17 @@ def _is_letter(ch):
     return False
 
 
-def _is_sep_char(ch):
-    if ch in "\n\r":
-        return False
-    if ch.isdigit() or _is_letter(ch):
-        return False
-    return True
-
-
 def _consume_sep(text, pos, end):
-    """ledger_calc.consume_separator_run 과 동일: 글자는 run 을 끊어요."""
+    """비문자·비숫자 구분(글자·줄바꿈 제외)이 이어지면 같은 run."""
     if pos >= end:
         return None
     start = pos
-    nws = 0
-    moved = False
     while pos < end:
         ch = text[pos]
-        if ch in " \t\u00a0" or (unicodedata.category(ch) == "Zs" and ch not in "\n\r"):
-            pos += 1
-            moved = True
-            continue
-        if _is_sep_char(ch):
-            nws += 1
-            if nws > _MAX_SEP:
-                return None
-            pos += 1
-            moved = True
-            continue
-        break
-    return pos if moved and pos > start else None
+        if ch.isdigit() or _is_letter(ch) or ch in "\n\r":
+            break
+        pos += 1
+    return pos if pos > start else None
 
 
 def iter_connected_runs(text):
@@ -156,11 +137,27 @@ def _is_valid_hhmm(chunks, digits, ci):
 def _is_card_four_at(chunks, i):
     if i + 3 >= len(chunks):
         return False
-    if not all(chunks[i + k] == 4 for k in range(4)):
+    return all(chunks[i + k] == 4 for k in range(4))
+
+
+def _card_immediately_before_clock(chunks, digits, ci_time):
+    cs = ci_time - 4
+    if cs < 0 or not _is_card_four_at(chunks, cs):
         return False
-    if i == 1 and len(chunks) == 3 and chunks[0] == 3 and chunks[1] == 4 and chunks[2] == 4:
+    if cs == 0:
+        return True
+    if sum(chunks[:cs]) <= 2:
+        return True
+    if cs == 3 and _is_phone_prefix(chunks, digits):
+        return True
+    return False
+
+
+def _trailing_card_time(chunks, digits):
+    n = len(chunks)
+    if n < 6 or not _is_valid_hhmm(chunks, digits, n - 2):
         return False
-    return True
+    return _card_immediately_before_clock(chunks, digits, n - 2)
 
 
 def _chunk_ranges(text, start, end, chunks):
@@ -244,27 +241,6 @@ def _run_fully_public(text, start, end, chunks, digits):
     return False
 
 
-def _trailing_card_time(chunks, digits):
-    n = len(chunks)
-    if n < 6 or not _is_valid_hhmm(chunks, digits, n - 2):
-        return False
-    if n == 6 and chunks[:4] == (4, 4, 4, 4):
-        return True
-    if (
-        n == 7
-        and chunks[0] <= 2
-        and len(chunks) >= 6
-        and chunks[1:5] == (4, 4, 4, 4)
-    ):
-        return True
-    if _is_date_seq(chunks[n - 3 : n], digits[-8:]):
-        return False
-    for cs in (n - 6, n - 7):
-        if cs >= 0 and _is_card_four_at(chunks, cs):
-            return True
-    return False
-
-
 def _comma_amount_hi(text, start, end, chunks, lo, hi):
     cr = _chunk_ranges(text, start, end, chunks)
     for i in range(lo, hi + 1):
@@ -277,28 +253,36 @@ def _comma_amount_hi(text, start, end, chunks, lo, hi):
 
 
 def _audit_chunk_range(chunks, digits):
+    """9자리 이상 run: 감사 구간(앞 날짜·끝 달력/시각·전화 접두 제외)."""
     n = len(chunks)
     if sum(chunks) < 9 and not any(c >= 5 for c in chunks):
         return None
     lo, hi = 0, n - 1
     if n >= 4 and _is_date_seq(chunks[:3], digits[:8]) and not _run_is_date_plain_tail(chunks, digits):
         lo = 3
-    elif n > 3 and _is_phone_prefix(chunks, digits) and not any(chunks[k] >= 4 for k in range(3, n)):
-        lo = 3
     elif n > 3 and _is_phone_prefix(chunks, digits):
         lo = 3
+    if lo == 0:
+        for ci in range(1, n):
+            if sum(chunks[:ci]) > 2:
+                break
+            if _is_card_four_at(chunks, ci):
+                lo = ci
+                break
     if _trailing_card_time(chunks, digits):
         hi = n - 3
     elif n >= 3 and _is_date_seq(chunks[n - 3 : n], digits[-8:]):
-        hi = n - 4
-    for ci in range(lo, hi + 1):
-        if _is_card_four_at(chunks, ci):
-            if ci > lo and sum(chunks[lo:ci]) <= 2:
-                lo = ci
-            else:
-                lo = min(lo, ci)
-            break
-    return lo, hi
+        try:
+            y = int(digits[-8:][:4])
+        except ValueError:
+            y = 0
+        if 2000 <= y <= 2100:
+            hi = n - 4
+    if lo <= hi and sum(chunks[lo : hi + 1]) >= 9:
+        return lo, hi
+    if any(chunks[k] >= 5 for k in range(lo, hi + 1)):
+        return lo, hi
+    return None
 
 
 def _audit_positions(text, start, end, chunks, digits):

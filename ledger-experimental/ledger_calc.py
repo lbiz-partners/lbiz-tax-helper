@@ -747,6 +747,8 @@ def run_is_standalone_business_reg(text, start, end, chunks, digits):
 
 def run_is_phone_entire_run(chunks, digits, n):
     if n == 3 and chunks[0] == 3 and chunks[1] == 4 and chunks[2] == 4:
+        if digits[:3] not in ("010", "011", "016", "017", "018", "019"):
+            return False
         return phone_digits_credible(digits)
     if n == 3 and chunks == (2, 4, 4) and digits[:2] == "02":
         return phone_digits_credible(digits)
@@ -882,25 +884,30 @@ def card_clock_tail_chunk_hi(chunks, digits, card_start):
     return None
 
 
+def _card_immediately_before_clock(chunks, digits, ci_time):
+    """(2,2) 시각 바로 앞이 4-4-4-4 카드(짧은 접두·전화 허용)일 때만."""
+    cs = ci_time - 4
+    if cs < 0 or not is_card_four_chunk_at(chunks, cs):
+        return False
+    if cs == 0:
+        return True
+    if sum(chunks[:cs]) <= 2:
+        return True
+    if cs == 3 and run_is_phone_entire_run(chunks[:3], digits[:11], 3):
+        return True
+    return False
+
+
 def is_trailing_card_time_not_calendar(chunks, digits):
     """카드 4-4-4-4 직후 (2,2) 시:분만 달력 꼬리와 구분."""
     n = len(chunks)
     if n < 6 or not is_valid_clock_hhmm(chunks, digits, n - 2):
         return False
-    if n == 6 and chunks[:4] == (4, 4, 4, 4):
-        return True
-    if (
-        n == 7
-        and chunks[0] <= 2
-        and len(chunks) >= 6
-        and chunks[1:5] == (4, 4, 4, 4)
-    ):
+    ci_time = n - 2
+    if _card_immediately_before_clock(chunks, digits, ci_time):
         return True
     if is_date_digit_sequence(chunks[n - 3 : n], digits[-8:]):
         return False
-    for card_start in (n - 6, n - 7):
-        if card_start >= 0 and is_card_four_chunk_at(chunks, card_start):
-            return True
     return False
 
 
@@ -910,7 +917,13 @@ def is_trailing_calendar_date(chunks, digits):
         return False
     if is_trailing_card_time_not_calendar(chunks, digits):
         return False
-    return is_date_digit_sequence(chunks[n - 3:n], digits[-8:])
+    if not is_date_digit_sequence(chunks[n - 3 : n], digits[-8:]):
+        return False
+    try:
+        y = int(digits[-8:][:4])
+    except ValueError:
+        return False
+    return 2000 <= y <= 2100
 
 
 def is_card_four_chunk_at(chunks, i):
@@ -918,9 +931,6 @@ def is_card_four_chunk_at(chunks, i):
         return False
     if not all(chunks[i + k] == 4 for k in range(4)):
         return False
-    if i >= 1 and chunks[i - 1] == 3 and chunks[i] == 4:
-        if not (i == 1 and len(chunks) >= 5 and chunks[0] == 3):
-            return False
     if i == 1 and len(chunks) == 3 and chunks[0] == 3 and chunks[1] == 4 and chunks[2] == 4:
         return False
     return True
@@ -934,22 +944,6 @@ def iter_card_four_chunk_starts(chunks):
             yield i
 
 
-def mask_sensitive_lo_in_run(chunks, digits, n):
-    """가릴 구간의 첫 chunk 인덱스(앞쪽 날짜·전화 예외는 유지)."""
-    if n >= 4 and is_date_digit_sequence(chunks[:3], digits[:8]):
-        return 3
-    if n > 3 and run_is_phone_entire_run(chunks[:3], digits[:11], 3):
-        if n == 3 or not any(chunks[k] >= 4 for k in range(3, n)):
-            return 3
-    for ci in range(n):
-        if not is_card_four_chunk_at(chunks, ci):
-            continue
-        if 0 < ci <= 2 and sum(chunks[:ci]) <= 2:
-            return ci
-        break
-    return 0
-
-
 def trim_mask_tail_hi(text, start, end, chunks, digits, lo, tail_hi):
     """끝쪽 쉼표 금액·단위 접미사는 가리지 않아요."""
     n = len(chunks)
@@ -957,11 +951,6 @@ def trim_mask_tail_hi(text, start, end, chunks, digits, lo, tail_hi):
         c0, _ = chunk_char_range(text, start, end, chunks, i)
         if try_comma_amount_end(text, c0, end) == end and i > lo:
             if i > 0 and chunks[i - 1] >= 5:
-                continue
-            irregular_acct = len(chunks) >= 4 and not any(
-                is_card_four_chunk_at(chunks, ci) for ci in range(max(0, n - 5))
-            )
-            if irregular_acct and i < n - 1:
                 continue
             tail_hi = min(tail_hi, i - 1)
             break
@@ -975,7 +964,7 @@ def trim_mask_tail_hi(text, start, end, chunks, digits, lo, tail_hi):
 
 
 def mask_sensitive_tail_hi(chunks, digits, n):
-    """가릴 구간의 마지막 chunk 인덱스(끝 시각·달력 꼬리는 유지)."""
+    """가릴 구간 끝: 카드 뒤 시각은 run 밖으로 두고, 달력 꼬리는 유지."""
     if is_trailing_card_time_not_calendar(chunks, digits):
         if n >= 2 and chunks[-2] == 2 and chunks[-1] == 2:
             return n - 3
@@ -984,25 +973,8 @@ def mask_sensitive_tail_hi(chunks, digits, n):
     return n - 1
 
 
-def expand_sensitive_lo(chunks, digits, lo, tail_hi):
-    """카드·9자리 이상 본체는 앞쪽 짧은 접두(2자리 이하)만 남기고 같이 가려요."""
-    n = len(chunks)
-    card_at = None
-    for ci in range(lo, tail_hi + 1):
-        if is_card_four_chunk_at(chunks, ci):
-            card_at = ci
-            break
-    if card_at is not None:
-        if card_at > lo and sum(chunks[lo:card_at]) <= 2:
-            return card_at
-        return min(lo, card_at)
-    if sum(chunks[lo : tail_hi + 1]) >= 9:
-        return lo
-    return lo
-
-
 def iter_mask_spans_in_run(text, start, end, chunks, digits):
-    """9자리 이상(또는 5자리 덩어리) connected run 은 기본 가림, 단독 예외 run 만 유지."""
+    """9자리 이상 connected run: run 전체에서 끝 4자리만 남기고 가려요(단독 예외 run 제외)."""
     n = len(chunks)
     if run_is_standalone_keep(text, start, end, chunks, digits):
         return
@@ -1010,81 +982,85 @@ def iter_mask_spans_in_run(text, start, end, chunks, digits):
     if not needs:
         return
 
-    lo = mask_sensitive_lo_in_run(chunks, digits, n)
-    if lo >= n:
-        return
-    if lo == 3 and n >= 4 and is_date_digit_sequence(chunks[:3], digits[:8]):
+    lo = 0
+    if n >= 4 and is_date_digit_sequence(chunks[:3], digits[:8]):
         if run_is_date_plus_short_plain_amount(text, start, end, chunks, digits):
             return
+        lo = 3
 
     tail_hi = mask_sensitive_tail_hi(chunks, digits, n)
     tail_hi = trim_mask_tail_hi(text, start, end, chunks, digits, lo, tail_hi)
     if tail_hi < lo:
         return
 
-    lo = expand_sensitive_lo(chunks, digits, lo, tail_hi)
+    if lo == 0:
+        for ci in range(1, n):
+            if sum(chunks[:ci]) > 2:
+                break
+            if is_card_four_chunk_at(chunks, ci):
+                lo = ci
+                break
 
-    phone_masked = False
-    if n >= 6 and run_is_phone_entire_run(chunks[:3], digits[:11], 3):
+    rest_has_card = any(is_card_four_chunk_at(chunks, ci) for ci in range(3, n))
+    apply_phone = (
+        n >= 6
+        and run_is_phone_entire_run(chunks[:3], digits[:11], 3)
+        and (not any(chunks[k] >= 4 for k in range(3, n)) or rest_has_card)
+    )
+    if apply_phone:
         ps0, _ = chunk_char_range(text, start, end, chunks, 0)
         _, ps1 = chunk_char_range(text, start, end, chunks, 2)
         yield ps0, ps1, "last4"
         lo = max(lo, 3)
         phone_masked = True
+    else:
+        phone_masked = False
 
-    if phone_masked and n >= 7 and is_trailing_calendar_date(chunks, digits):
-        tail_hi = mask_sensitive_tail_hi(chunks, digits, n)
-        tail_hi = trim_mask_tail_hi(text, start, end, chunks, digits, 3, tail_hi)
-        if tail_hi >= 3:
-            s0, _ = chunk_char_range(text, start, end, chunks, 3)
-            _, s1 = chunk_char_range(text, start, end, chunks, tail_hi)
-            yield s0, s1, "all"
-        return
-
-    for ci in range(lo, tail_hi + 1):
-        if not is_card_followed_by_clock(chunks, digits, ci):
-            continue
-        if ci > 0 and sum(chunks[:ci]) > 2:
-            if not (phone_masked and ci >= 3):
-                continue
-        if ci > lo:
-            ps0, _ = chunk_char_range(text, start, end, chunks, lo)
-            _, ps1 = chunk_char_range(text, start, end, chunks, ci - 1)
-            yield ps0, ps1, "last4"
-        s0, _ = chunk_char_range(text, start, end, chunks, ci)
-        _, s1 = chunk_char_range(text, start, end, chunks, ci + 3)
-        short_pre = ci > 0 and sum(chunks[:ci]) <= 2
-        card_mode = "last4" if (short_pre or phone_masked) else "all"
-        yield s0, s1, card_mode
-        clk_hi = card_clock_tail_chunk_hi(chunks, digits, ci)
-        ci_time = ci + 4
-        if (
-            clk_hi is not None
-            and ci_time + 2 < len(chunks)
-            and chunks[ci_time] == 2
-            and chunks[ci_time + 1] == 2
-            and chunks[ci_time + 2] == 2
-            and ci_time + 3 >= len(chunks)
-        ):
-            ts0, _ = chunk_char_range(text, start, end, chunks, ci_time)
-            _, ts1 = chunk_char_range(text, start, end, chunks, clk_hi)
-            yield ts0, ts1, "clock_head"
-        elif ci_time + 1 < len(chunks) and is_valid_clock_hhmm(chunks, digits, ci_time):
-            t_end = ci_time + 1
-            tilde_range = False
-            if t_end + 1 < len(chunks):
-                _, c5_end = chunk_char_range(text, start, end, chunks, t_end)
-                c6_start, _ = chunk_char_range(text, start, end, chunks, t_end + 1)
-                sep = text[c5_end:c6_start]
-                tilde_range = "~" in sep or "～" in sep
-            if tilde_range:
+    if is_trailing_card_time_not_calendar(chunks, digits):
+        card_tail = n - 3
+        card_tail = trim_mask_tail_hi(text, start, end, chunks, digits, lo, card_tail)
+        if card_tail >= lo:
+            short_pre = lo > 0 and sum(chunks[:lo]) <= 2
+            if phone_masked and lo >= 3:
+                card_mode = "last4"
+            elif short_pre:
+                card_mode = "last4"
+            else:
+                card_mode = "all"
+            s0, _ = chunk_char_range(text, start, end, chunks, lo)
+            _, s1 = chunk_char_range(text, start, end, chunks, card_tail)
+            yield s0, s1, card_mode
+        card_start = None
+        for ci in range(lo, n):
+            if is_card_four_chunk_at(chunks, ci):
+                card_start = ci
+                break
+        if card_start is not None:
+            ci_time = card_start + 4
+            if (
+                ci_time + 2 < n
+                and chunks[ci_time] == 2
+                and chunks[ci_time + 1] == 2
+                and chunks[ci_time + 2] == 2
+                and ci_time + 3 >= n
+            ):
                 ts0, _ = chunk_char_range(text, start, end, chunks, ci_time)
-                _, ts1 = chunk_char_range(text, start, end, chunks, t_end)
-                yield ts0, ts1, "clock_head_four"
+                _, ts1 = chunk_char_range(text, start, end, chunks, ci_time + 2)
+                yield ts0, ts1, "clock_head"
+            elif ci_time + 1 < len(chunks) and is_valid_clock_hhmm(chunks, digits, ci_time):
+                t_end = ci_time + 1
+                tilde_range = False
+                if t_end + 1 < len(chunks):
+                    _, c5_end = chunk_char_range(text, start, end, chunks, t_end)
+                    c6_start, _ = chunk_char_range(text, start, end, chunks, t_end + 1)
+                    sep = text[c5_end:c6_start]
+                    tilde_range = "~" in sep or "～" in sep
+                if tilde_range:
+                    ts0, _ = chunk_char_range(text, start, end, chunks, ci_time)
+                    _, ts1 = chunk_char_range(text, start, end, chunks, t_end)
+                    yield ts0, ts1, "clock_head_four"
         return
 
-    s0, _ = chunk_char_range(text, start, end, chunks, lo)
-    _, s1 = chunk_char_range(text, start, end, chunks, tail_hi)
     s0, _ = chunk_char_range(text, start, end, chunks, lo)
     _, s1 = chunk_char_range(text, start, end, chunks, tail_hi)
     yield s0, s1, "last4"
