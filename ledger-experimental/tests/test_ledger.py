@@ -1400,6 +1400,8 @@ class LedgerTests(unittest.TestCase):
                 masked = mask_text(text)
                 self.assertTrue(fuzz_output_masks_input_digits(text, masked), text)
                 self.assertTrue(fuzz_output_masks_input_digits(text, row_blob), text)
+                self.assertFalse(independent_digit_leak(text, masked), text)
+                self.assertFalse(independent_digit_leak(text, row_blob), text)
 
         bad_out = "5123 4567 8901 2346"
         self.assertTrue(independent_digit_leak(bad_out, bad_out))
@@ -1408,7 +1410,7 @@ class LedgerTests(unittest.TestCase):
         for seed in (20261104, 20261105):
             run_seed(seed, 100)
 
-    def test_31_r8_simple_rules_f1_f2_f3(self):
+    def test_31_baseline_mask_and_cli_outputs(self):
         mask_inputs = (
             "123456 789012",
             "12345678 12345678",
@@ -1447,7 +1449,7 @@ class LedgerTests(unittest.TestCase):
         for raw in exclude_inputs:
             self.assertTrue(row_contains_rrn(raw), raw)
 
-        pii = os.path.join(self.tmp, "r8_t31.csv")
+        pii = os.path.join(self.tmp, "baseline_t31.csv")
         with open(pii, "w", encoding="utf-8", newline="") as f:
             w = csv.writer(f)
             w.writerow(HEADER.split(","))
@@ -1455,7 +1457,7 @@ class LedgerTests(unittest.TestCase):
             for idx, text in enumerate(rows):
                 w.writerow(["2026-11-{0:02d}".format((idx % 28) + 1), "가", text, "",
                             "1000", "카드", "소모품비", "제안", "", "사용자 제공"])
-        out = os.path.join(self.tmp, "r8_t31_out")
+        out = os.path.join(self.tmp, "baseline_t31_out")
         code, stdout, tail = calc(pii, out, "--as-of", "2026-11-03")
         self.assertEqual(code, 10, stdout)
         blob = all_output_text(out) + stdout
@@ -1483,7 +1485,7 @@ class LedgerTests(unittest.TestCase):
                 if j - i >= 5 and norm_o[i:j] in unicodedata.normalize("NFKC", blob):
                     self.fail("5+ digit chunk in blob for {!r}".format(raw))
 
-    def test_32_r9_known_regression_cases(self):
+    def test_32_known_must_mask_cases(self):
         must_mask = (
             "2026-11-03 15000",
             "2026-11-03 100000",
@@ -1509,12 +1511,12 @@ class LedgerTests(unittest.TestCase):
         import importlib.util
         import random
 
-        r8_path = os.path.join(ROOT, "reference", "ledger_calc_r8.py")
-        spec = importlib.util.spec_from_file_location("ledger_calc_r8", r8_path)
-        r8 = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(r8)
+        baseline_path = os.path.join(ROOT, "reference", "ledger_calc_baseline.py")
+        spec = importlib.util.spec_from_file_location("ledger_calc_baseline", baseline_path)
+        baseline = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(baseline)
 
-        def count_r9(seed, n=300):
+        def count_current_mask_leaks(seed, n=300):
             rng = random.Random(seed)
             sep_chars = "-–—\u2010\u2212\u3161:·|*./_,\u00a0 "
             def sep_run():
@@ -1558,11 +1560,11 @@ class LedgerTests(unittest.TestCase):
                     leaks += 1
             return leaks
 
-        # 독립 leak_check: strict 300건 기준(시드·생성기는 scripts/fuzz_leak_report.py strict 와 동일).
-        self.assertEqual(count_r9(20261104), 0)
-        self.assertEqual(count_r9(20261105), 0)
+        # leak_check: strict 300건(시드·생성기는 scripts/fuzz_leak_report.py strict 와 동일).
+        self.assertEqual(count_current_mask_leaks(20261104), 0)
+        self.assertEqual(count_current_mask_leaks(20261105), 0)
 
-        def count_r8(seed, n=300):
+        def count_baseline(seed, n=300):
             rng = random.Random(seed)
             sep_chars = "-–—\u2010\u2212\u3161:·|*./_,\u00a0 "
             def sep_run():
@@ -1599,25 +1601,25 @@ class LedgerTests(unittest.TestCase):
                     text = body + " " + rng.choice(prefixes)()
                 else:
                     text = rng.choice(prefixes)() + " " + body + " " + rng.choice(prefixes)()
-                if r8.row_contains_rrn(text):
+                if baseline.row_contains_rrn(text):
                     continue
                 total += 1
-                if independent_digit_leak(text, r8.mask_text(text)):
+                if independent_digit_leak(text, baseline.mask_text(text)):
                     leaks += 1
             return leaks
 
-        self.assertGreater(count_r8(20261104), 0)
-        self.assertGreater(count_r8(20261105), 0)
-        self.assertTrue(independent_digit_leak("2026-11-03 15000", r8.mask_text("2026-11-03 15000")))
+        self.assertGreater(count_baseline(20261104), 0)
+        self.assertGreater(count_baseline(20261105), 0)
+        self.assertTrue(independent_digit_leak("2026-11-03 15000", baseline.mask_text("2026-11-03 15000")))
 
-    def test_34_qa_pr1_high_medium_regressions(self):
+    def test_34_card_time_separator_regressions(self):
         """고정 회귀 입력: 카드·시각·앞자리·하이픈 변형."""
         import importlib.util
 
-        r8_path = os.path.join(ROOT, "reference", "ledger_calc_r8.py")
-        spec = importlib.util.spec_from_file_location("ledger_calc_r8", r8_path)
-        r8 = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(r8)
+        baseline_path = os.path.join(ROOT, "reference", "ledger_calc_baseline.py")
+        spec = importlib.util.spec_from_file_location("ledger_calc_baseline", baseline_path)
+        baseline = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(baseline)
 
         cases = (
             ("카드 5123-4567-8901-2346 11:05", "카드 ****-****-****-**** 11:05"),
@@ -1638,15 +1640,15 @@ class LedgerTests(unittest.TestCase):
             self.assertEqual(masked, expected, raw)
             self.assertFalse(independent_digit_leak(raw, masked), raw)
             self.assertNotEqual(bad, expected, raw)
-        self.assertEqual(r8.mask_text(cases[0][0]), pre_fix[0])
-        self.assertEqual(r8.mask_text(cases[1][0]), cases[1][1])
-        self.assertEqual(r8.mask_text(cases[3][0]), pre_fix[3])
-        self.assertNotEqual(r8.mask_text(cases[4][0]), pre_fix[4])
+            self.assertEqual(baseline.mask_text(cases[0][0]), pre_fix[0])
+            self.assertEqual(baseline.mask_text(cases[1][0]), cases[1][1])
+            self.assertEqual(baseline.mask_text(cases[3][0]), pre_fix[3])
+            self.assertNotEqual(baseline.mask_text(cases[4][0]), pre_fix[4])
 
         self.assertTrue(independent_digit_leak("5123 4567 8901 2346", "5123 4567 8901 2346"))
         self.assertFalse(independent_digit_leak("5123 4567 8901 2346", mask_text("5123 4567 8901 2346")))
 
-    def test_36_round10_qa_recheck_regressions(self):
+    def test_36_card_neighbor_comma_regressions(self):
         """카드+시각·이웃 계좌·쉼표 금액 회귀(연도 1900~2100 포함)."""
         cases = (
             ("카드 5123-4567-8901-2024 11:05", "카드 ****-****-****-**** 11:05"),
@@ -1664,7 +1666,7 @@ class LedgerTests(unittest.TestCase):
         self.assertTrue(independent_digit_leak("카드 5123-4567-8901-2024 11:05", partial))
 
     def test_37_letter_glued_and_precard_regressions(self):
-        """글자 붙임·앞 숫자+카드+시각: 가림과 독립 leak 검사."""
+        """글자 붙임·앞 숫자+카드+시각: mask_text 와 leak_check 검사."""
         mask_cases = (
             ("카드5123-4567-8901-2346", "카드****-****-****-2346"),
             ("계좌110-123-456789", "계좌***-***-**6789"),

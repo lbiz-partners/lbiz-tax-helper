@@ -4,6 +4,9 @@
 연결 run(비문자 구분 + letter→digit 붙임)마다, 9자리 이상이면
 run 안 모든 숫자 위치 중 끝 4자리만 숫자로 남을 수 있음. 그 외는 누출.
 주민등록번호 꼴은 한 자리라도 보이면 누출(행 제외는 row_contains_rrn).
+
+ledger_calc.mask_text 와 같은 run·last4 규칙을 이 파일에 **다시 구현**한 보조 검사기입니다.
+import 는 하지 않지만, 완전히 독립된 판정 알고리즘이라고 보기는 어렵습니다.
 """
 
 import datetime

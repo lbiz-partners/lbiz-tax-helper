@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""mask_text + 독립 leak_check fuzz 재현.
+"""mask_text + leak_check 보조 검사 fuzz 재현.
 
   cd ledger-experimental
   python3 scripts/fuzz_leak_report.py
@@ -152,9 +152,9 @@ def count_leaks(mask_fn, texts):
     return leaks
 
 
-def load_r8():
-    path = os.path.join(ROOT, "reference", "ledger_calc_r8.py")
-    spec = importlib.util.spec_from_file_location("ledger_calc_r8", path)
+def load_baseline_mask():
+    path = os.path.join(ROOT, "reference", "ledger_calc_baseline.py")
+    spec = importlib.util.spec_from_file_location("ledger_calc_baseline", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod.mask_text
@@ -175,14 +175,14 @@ def run_suite(name, seeds, generator, mask_fn):
 
 
 def main():
-    r8 = load_r8()
+    baseline_mask = load_baseline_mask()
     run_suite("strict", SEEDS_STRICT, gen_strict, mask_text)
     run_suite("realistic", SEEDS_REALISTIC, gen_realistic, mask_text)
     run_suite("letter-glued", SEEDS_GLUED, gen_letter_glued, mask_text)
     run_suite("preceding-number+card", SEEDS_PRECARD, gen_preceding_card, mask_text)
-    print("(reference r8 strict total on same strict generator)")
-    t = sum(count_leaks(r8, gen_strict(s, N)) for s in SEEDS_STRICT)
-    print("r8 strict total", t)
+    print("(reference baseline strict total on same strict generator)")
+    t = sum(count_leaks(baseline_mask, gen_strict(s, N)) for s in SEEDS_STRICT)
+    print("baseline strict total", t)
 
 
 if __name__ == "__main__":
