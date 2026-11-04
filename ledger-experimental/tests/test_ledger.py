@@ -1641,6 +1641,21 @@ class LedgerTests(unittest.TestCase):
         self.assertTrue(independent_digit_leak("5123 4567 8901 2346", "5123 4567 8901 2346"))
         self.assertFalse(independent_digit_leak("5123 4567 8901 2346", mask_text("5123 4567 8901 2346")))
 
+    def test_35_strict_fuzz_six_checker_false_positives(self):
+        """strict fuzz 잔여 건: 가림 정상·검사기만 run 구간/날짜 꼬리 분리로 오탐 제거."""
+        cases = (
+            "47개 469_*424_*476990 2026-11-03",
+            "46개 8529_:9485_:7506_:6356 2026-11-03",
+            "61개 6087ㅡ–9284ㅡ–4261ㅡ–1403 2026-11-03",
+            "20개 1931—6043—1410—3130 2026-11-03",
+            "46개 1197·|3911·|7956·|1761 2026-11-03",
+            "58개 549−/285−/080471 2026-11-03",
+            "5052821 5444–2426–1105–7271 2026-11-03",
+        )
+        for raw in cases:
+            masked = mask_text(raw)
+            self.assertFalse(independent_digit_leak(raw, masked), raw)
+
 
 if __name__ == "__main__":
     unittest.main()
