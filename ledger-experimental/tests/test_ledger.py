@@ -69,6 +69,34 @@ def read(path):
         return f.read()
 
 
+def helper_rules_dir():
+    """tax-rules.md와 tax-start.md가 있는 폴더.
+
+    TAX_HELPER_RULES_DIR가 있고 그 안에 두 파일이 있으면 그 폴더를 쓴다.
+    아니면 ledger-experimental의 상위 폴더를 쓴다.
+    두 곳 모두에 두 파일이 없으면 (None, 이유)를 돌려준다.
+    """
+    names = ("tax-rules.md", "tax-start.md")
+    parent = os.path.normpath(os.path.dirname(ROOT))
+    env = os.environ.get("TAX_HELPER_RULES_DIR", "").strip()
+    ordered = []
+    if env:
+        ordered.append(os.path.normpath(env))
+    if parent not in ordered:
+        ordered.append(parent)
+    for directory in ordered:
+        if all(os.path.isfile(os.path.join(directory, name)) for name in names):
+            return directory, None
+    reason = (
+        "tax-rules.md와 tax-start.md를 찾지 못해 건너뜁니다. "
+        "TAX_HELPER_RULES_DIR="
+        + (env or "(없음)")
+        + ", 상위 폴더="
+        + parent
+    )
+    return None, reason
+
+
 def read_csv(path):
     with open(path, "r", encoding="utf-8-sig", newline="") as f:
         return list(csv.reader(f))
@@ -2286,10 +2314,12 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(compose_answer(DISCLAIMER, "본문", DISCLAIMER).count(DISCLAIMER), 1)
         self.assertEqual(compose_answer("앞 " + DISCLAIMER + " 뒤", DISCLAIMER).count(DISCLAIMER), 1)
 
-        repo = os.path.dirname(ROOT)
-        rules_main = read(os.path.join(repo, "tax-rules.md"))
+        rules_dir, reason = helper_rules_dir()
+        if rules_dir is None:
+            self.skipTest(reason)
+        rules_main = read(os.path.join(rules_dir, "tax-rules.md"))
         rules_ledger = read(RULES)
-        rules_start = read(os.path.join(repo, "tax-start.md"))
+        rules_start = read(os.path.join(rules_dir, "tax-start.md"))
         self.assertEqual(rules_main.count(DISCLAIMER), 1)
         self.assertIn("한 답에 딱 한 번만", rules_main)
         self.assertIn("다시 붙이지", rules_main)
@@ -2298,6 +2328,73 @@ class LedgerTests(unittest.TestCase):
         self.assertIn("다시 붙이지", rules_ledger)
         self.assertIn("한 답에 딱 한 번", rules_ledger)
         self.assertIn("모든 답의 틀", rules_ledger)
+
+    def test_63_first_answer_omits_repo_and_aside_unless_asked(self):
+        """첫 답에 hometax-doum 링크와 어사이드 Pro·pricing 안내를 무조건 넣으라고 하지 않음.
+
+        그 문장에 「물을 때만」 같은 조건이 붙어 있으면 통과한다.
+        맺음 고지 문구는 tax-rules.md에 그대로 있어야 한다.
+        """
+        rules_dir, reason = helper_rules_dir()
+        if rules_dir is None:
+            self.skipTest(reason)
+        rules_main = read(os.path.join(rules_dir, "tax-rules.md"))
+        rules_start = read(os.path.join(rules_dir, "tax-start.md"))
+        self.assertIn(DISCLAIMER, rules_main)
+        self.assertEqual(rules_main.count(DISCLAIMER), 1)
+
+        banned = (
+            "첫 질문이 무엇이든",
+            "요소는 모두 넣는다",
+            "첫 답의 본문 앞에 넣는다",
+            "첫 답 ①②③을 넣고",
+            "기준일·①②③·질문 하나",
+        )
+        for phrase in banned:
+            self.assertNotIn(phrase, rules_main, phrase)
+            self.assertNotIn(phrase, rules_start, phrase)
+
+        ask_only = re.compile(
+            r"물(?:을|었을|으셨을|어\s*볼|어\s*주셨을)\s*때만|묻지\s*않았"
+        )
+        markers = ("hometax-doum", "Pro 요금제", "aside.com/pricing")
+        for marker in markers:
+            self.assertIn(marker, rules_start, marker)
+            self._assert_marker_only_when_asked(rules_start, marker, ask_only, "tax-start.md")
+            self._assert_marker_only_when_asked(rules_main, marker, ask_only, "tax-rules.md")
+        self.assertIn("홈택스 화면을 봐야 하는 일일 때만", rules_start)
+
+    def _assert_marker_only_when_asked(self, text, marker, ask_only, label):
+        start = 0
+        while True:
+            index = text.find(marker, start)
+            if index < 0:
+                return
+            sentence = _sentence_containing(text, index)
+            self.assertRegex(
+                sentence,
+                ask_only,
+                label + "에서 '" + marker + "' 에 「물을 때만」 같은 조건이 없습니다: " + sentence,
+            )
+            start = index + len(marker)
+
+
+def _sentence_containing(text, index):
+    """마침표 뒤 공백 또는 줄바꿈으로 나눈 문장. URL 안의 점은 공백이 없어 경계가 아니다."""
+    head = text[:index]
+    boundaries = [m.end() for m in re.finditer(r"\.\s+", head)]
+    newline = head.rfind("\n") + 1
+    start = newline
+    if boundaries and boundaries[-1] > start:
+        start = boundaries[-1]
+    tail = text[index:]
+    match = re.search(r"\.\s+|\n", tail)
+    if not match:
+        return text[start:]
+    end = index + match.start()
+    if tail[match.start():match.start() + 1] == ".":
+        end += 1
+    return text[start:end]
 
 
 if __name__ == "__main__":
