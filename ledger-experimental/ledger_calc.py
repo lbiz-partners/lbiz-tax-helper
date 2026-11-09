@@ -36,6 +36,30 @@ FILING_ANSWER = "신고는 세무사와 상의해 주세요."
 PERSONAL_ANSWER = "대상 여부 판단은 하지 않아요. 대상이라고 하시고 법제처 출처 있는 값을 주시면 대략적인 금액은 계산해 드릴게요."
 CONFIRM_WITH_ADVISOR = "사용자님 경우에 맞는지는 세무사와 확인해 주세요."
 DISCLAIMER = "참고용 안내이며 세무대리나 세무상담이 아닙니다. 최종 판단은 직접 하시고, 중요한 건 세무사와 상의해 주세요."
+
+
+def append_disclaimer_once(lines):
+    """맺음 고지는 여기서만 붙인다. 같은 줄이 이미 있으면 빼 두고 맨 끝에 한 번만 둔다."""
+    body = [line for line in lines if line.strip() != DISCLAIMER]
+    return body + [DISCLAIMER]
+
+
+def compose_answer(*parts):
+    """프로그램 출력과 답 틀의 맨 끝 줄을 한 답으로 합친다. 맺음 고지는 딱 한 번이다."""
+    lines = []
+    for part in parts:
+        if not part:
+            continue
+        lines.extend(str(part).splitlines())
+    body = "\n".join(line for line in lines if line.strip() != DISCLAIMER)
+    if DISCLAIMER in body:
+        body = "\n".join(body.replace(DISCLAIMER, "\n").splitlines())
+    body = body.rstrip()
+    if not body:
+        return DISCLAIMER
+    return body + "\n" + DISCLAIMER
+
+
 ILLUSTRATIVE_EXAMPLE_DISCLAIMER = "꾸민 예시·대략적인 금액이며 실제로 하실 때는 세무사와 직접 확인하세요"
 LBIZ_CALC_DISCLAIMER = "엘비즈 계산기로 낸 대략적인 금액이며 홈택스와 다를 수 있어요. 실제로 하실 때는 세무사와 직접 확인하세요."
 ELIGIBILITY_PREMISE = "사용자님이 대상이라고 하셨을 때만 계산해요. 대상 여부 판단은 세무사와 확인해 주세요."
@@ -1428,7 +1452,8 @@ def build_summary_md(as_of_line, data, monthly, totals):
               "- 계정의 「확정」은 사용자님이 「맞아요」 하신 것이고, 「제안」은 아직 확인 전이에요.",
               "- 원본 영수증과 장부는 따로 보관해 주세요.",
               "- " + FILING_ANSWER,
-              "", DISCLAIMER]
+              ""]
+    lines = append_disclaimer_once(lines)
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
@@ -1549,15 +1574,14 @@ def topic_lines(topic_id):
         url = law_url(law_name, jo, branch)
         if url not in urls:
             urls.append(url)
-    return [
+    return append_disclaimer_once([
         "[{} {}] 일반 정보: {} — 근거 조문: {} — 적용 기간·시행일 {} — 출처 주소: {} — 확인일 {} ({})".format(
             topic_id, t["title"], t["info"], t["basis"], CHECK, " · ".join(urls), CHECK_DATE, CHECK_ORG),
         "세율·한도·금액·기한 같은 숫자: " + NUMBER_SLOT,
         "꾸민 예시를 드릴 때는 반드시 「{}」 문장을 붙여요.".format(ILLUSTRATIVE_EXAMPLE_DISCLAIMER),
         CONFIRM_WITH_ADVISOR,
         "남은 {}: {}".format(CHECK, t["remaining"]),
-        DISCLAIMER,
-    ]
+    ])
 
 
 def cmd_topic(args):
@@ -1797,11 +1821,13 @@ def cmd_estimate(args):
             tax_amount, business_income, total_income, rate, int(raw_deduction), limit))
         print("- 결과: {:,}원".format(deduction_int))
         print("")
-        print(G2_PREREQUISITE)
-        print(G2_EXCLUSION_WARNING)
-        print(ELIGIBILITY_PREMISE)
-        print(LBIZ_CALC_DISCLAIMER)
-        print(DISCLAIMER)
+        for line in append_disclaimer_once([
+                G2_PREREQUISITE,
+                G2_EXCLUSION_WARNING,
+                ELIGIBILITY_PREMISE,
+                LBIZ_CALC_DISCLAIMER,
+        ]):
+            print(line)
 
         return finish("ok", 0, {
             "topic": topic_id,
