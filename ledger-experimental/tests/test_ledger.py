@@ -2424,6 +2424,62 @@ class LedgerTests(unittest.TestCase):
         rules_main = read(os.path.join(rules_dir, "tax-rules.md"))
         self.assertIn("화면 사진은 『캡처』로 쓴다(『캐프』 같은 줄임·오타 금지)", rules_main)
 
+    def test_67_screen_photo_spelling_is_exact_capture(self):
+        """화면 사진 낱말은 정확히 「캡처」(캡+처)만 쓴다.
+
+        『캐처』『캡쳐』는 금지 목록 줄에만 있고, 보기 문장은 「캡처」이며,
+        MANIFEST의 파일sha256·본문sha256이 규칙 파일과 같다.
+        """
+        rules_dir, reason = helper_rules_dir()
+        if rules_dir is None:
+            self.skipTest(reason)
+        rule_bits = (
+            "매번 정확히 「캡처」(캡+처)로만 쓴다",
+            "금지하는 비슷해 보이는 꼴은 『캐처』『캐프』『캡쳐』『켑처』",
+            "보내기 전에 화면 사진 낱말이 나올 때마다 철자가 캡처인지 확인",
+            "확실하지 않으면 「화면 사진」이라고 쓴다",
+        )
+        choice = "이미 연결함 / 연결 안내 원함 / 말씀·캡처로 진행"
+        forbidden_line = "『캐처』『캐프』『캡쳐』『켑처』"
+        names = ("tax-rules.md", "tax-start.md")
+        for name in names:
+            text = read(os.path.join(rules_dir, name))
+            for bit in rule_bits:
+                self.assertIn(bit, text, name)
+            outside = "\n".join(
+                line for line in text.splitlines() if forbidden_line not in line
+            )
+            self.assertNotIn("캐처", outside, name)
+            self.assertNotIn("캡쳐", outside, name)
+            self.assertNotIn("말씀·캐처", text, name)
+            self.assertNotIn("말씀이나 캐처", text, name)
+            self.assertNotIn("말씀·캡쳐", text, name)
+            self.assertNotIn("말씀이나 캡쳐", text, name)
+        start = read(os.path.join(rules_dir, "tax-start.md"))
+        self.assertIn(choice, start)
+        self.assertIn("말씀이나 캡처로 진행", start)
+        self.assertIn("「말씀·캡처로 진행」", start)
+
+        manifest_path = os.path.join(rules_dir, "MANIFEST.txt")
+        manifest = read(manifest_path)
+        found = {}
+        for line in manifest.splitlines():
+            match = re.match(r"^([0-9a-f]{64})  ([0-9a-f]{64})  (\S+)  (.+)$", line)
+            if not match:
+                continue
+            found[match.group(3)] = (match.group(1), match.group(2), match.group(4))
+        expected_skills = {
+            "tax-rules.md": "세금정리도우미 업무 규칙",
+            "tax-start.md": "세금정리도우미 시작하기",
+        }
+        self.assertEqual(set(expected_skills), set(found))
+        for name, skill in expected_skills.items():
+            path = os.path.join(rules_dir, name)
+            file_hash, body_hash, listed_skill = found[name]
+            self.assertEqual(listed_skill, skill, name)
+            self.assertEqual(file_hash, sha256_file(path), name)
+            self.assertEqual(body_hash, _rule_body_sha256(read(path)), name)
+
     def _assert_marker_only_when_asked(self, text, marker, ask_only, label):
         start = 0
         while True:
@@ -2437,6 +2493,15 @@ class LedgerTests(unittest.TestCase):
                 label + "에서 '" + marker + "' 에 「물을 때만」 같은 조건이 없습니다: " + sentence,
             )
             start = index + len(marker)
+
+
+def _rule_body_sha256(text):
+    """MANIFEST 본문sha256. 맨 위 머리말(--- 두 줄 사이)을 뺀 뒤 앞뒤 공백을 지운다."""
+    match = re.match(r"^---\n.*?\n---\n", text, re.S)
+    if not match:
+        raise AssertionError("규칙 파일 맨 위에 머리말이 없습니다.")
+    body = text[match.end():].strip()
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
 def _sentence_containing(text, index):
