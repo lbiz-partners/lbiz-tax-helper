@@ -25,6 +25,7 @@ from ledger_calc import (  # noqa: E402
     is_separator_whitespace,
     row_contains_rrn,
     build_nfkc_mapping,
+    compose_answer,
 )
 
 PROG = os.path.join(ROOT, "ledger_calc.py")
@@ -2232,6 +2233,71 @@ class LedgerTests(unittest.TestCase):
         readme_path = os.path.join(os.path.dirname(PROG), "README.md")
         code, stdout, tail = run("lint", "--file", readme_path)
         self.assertEqual(code, 0, "README.md가 lint를 통과해야 함")
+
+    def test_62_closing_disclaimer_once_per_composed_answer(self):
+        """한 답에 맺음 고지는 딱 한 번. 프로그램 출력과 답 틀을 합쳐도 두 번이면 실패."""
+        import ledger_calc
+
+        self.assertEqual(ledger_calc.DISCLAIMER, DISCLAIMER)
+
+        def human(stdout):
+            lines = stdout.splitlines()
+            if lines and lines[-1].lstrip().startswith("{"):
+                lines = lines[:-1]
+            return "\n".join(lines).strip()
+
+        code, stdout, _ = run("topic", "--id", "G2")
+        self.assertEqual(code, 0)
+        topic_human = human(stdout)
+        self.assertEqual(topic_human.count(DISCLAIMER), 1)
+
+        code, stdout, _ = run(
+            "estimate", "--topic", "G2",
+            "--tax-amount", "1000000",
+            "--business-income", "800000",
+            "--total-income", "1000000",
+            "--rate", "0.5",
+            "--rate-source", "시험용 가짜 법령",
+            "--rate-date", "2026-11-03",
+            "--limit", "2000000",
+            "--limit-source", "시험용 가짜 법령",
+            "--limit-date", "2026-11-03",
+        )
+        self.assertEqual(code, 0)
+        estimate_human = human(stdout)
+        self.assertEqual(estimate_human.count(DISCLAIMER), 1)
+
+        out = os.path.join(self.tmp, "disclaimer_once")
+        code, _, _ = calc(BASIC, out, "--as-of", "2026-11-03")
+        self.assertEqual(code, 0)
+        summary = read(os.path.join(out, OUTPUT_FILES[3]))
+        self.assertEqual(summary.count(DISCLAIMER), 1)
+        result = json.loads(read(os.path.join(out, "result.json")))
+        self.assertEqual(result["disclaimer"], DISCLAIMER)
+
+        for body in (topic_human, estimate_human, summary, result["disclaimer"]):
+            doubled = body.rstrip() + "\n" + DISCLAIMER
+            self.assertGreaterEqual(doubled.count(DISCLAIMER), 2)
+            composed = compose_answer(body, DISCLAIMER)
+            self.assertEqual(composed.count(DISCLAIMER), 1)
+            self.assertTrue(composed.rstrip().endswith(DISCLAIMER))
+
+        self.assertEqual(compose_answer("본문만 있는 답").count(DISCLAIMER), 1)
+        self.assertEqual(compose_answer(DISCLAIMER, "본문", DISCLAIMER).count(DISCLAIMER), 1)
+        self.assertEqual(compose_answer("앞 " + DISCLAIMER + " 뒤", DISCLAIMER).count(DISCLAIMER), 1)
+
+        repo = os.path.dirname(ROOT)
+        rules_main = read(os.path.join(repo, "tax-rules.md"))
+        rules_ledger = read(RULES)
+        rules_start = read(os.path.join(repo, "tax-start.md"))
+        self.assertEqual(rules_main.count(DISCLAIMER), 1)
+        self.assertIn("한 답에 딱 한 번만", rules_main)
+        self.assertIn("다시 붙이지", rules_main)
+        self.assertNotIn(DISCLAIMER, rules_ledger)
+        self.assertNotIn(DISCLAIMER, rules_start)
+        self.assertIn("다시 붙이지", rules_ledger)
+        self.assertIn("한 답에 딱 한 번", rules_ledger)
+        self.assertIn("모든 답의 틀", rules_ledger)
 
 
 if __name__ == "__main__":
