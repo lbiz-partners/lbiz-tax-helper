@@ -161,6 +161,7 @@ python3 ledger_calc.py calc --input 장부초안/연-월/입력.csv --out 장부
 - `--own-business yes` 는 사용자님이 「예」라고 하셨을 때만 넣어요. 그 밖의 값이면 거절하고 파일을 만들지 않아요.
 - `--request-text` 에 다른 회사 요청으로 보이는 말이 있어도 거절해요.
 - 만드는 파일: `참고용 초안_신고용 아님_장부.csv`, `참고용 초안_신고용 아님_월별손익.csv`, `참고용 초안_신고용 아님_월별현금흐름.csv`, `참고용 초안_신고용 아님_요약.md`, `result.json`
+- 결과 파일에는 「도구 판 vX.Y」가 찍혀요(요약 .md 셋째 줄, CSV 첫 줄, result.json의 `tool_version`). 채팅 답에 다시 붙이지 않아요.
 - 이미 있는 출력 파일은 덮어쓰지 않아요. 출력 폴더가 바로가기(심볼릭 링크)이면 쓰지 않아요.
 - 마지막 줄은 한 줄 JSON(status, exit_code, notice)이에요.
 - 끝 번호: 0 정상 / 10 정상이지만 확인 필요·제외 줄 있음 / 2 거절·입력 오류 / 3 해시 불일치
@@ -194,4 +195,4 @@ python3 -m unittest -v tests.test_ledger
 
 ## 7. 기준 해시
 
-`ledger_calc.py` sha256: `840b38afc193b3eb792410f6d2e76b1277c498432d8447c9c702a98155ed2754`
+`ledger_calc.py` sha256: `71ada54b02163b4659caa606bbf48ed532162bde2d00b3f1dc2fc34319240284`

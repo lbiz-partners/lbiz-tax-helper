@@ -26,6 +26,9 @@ import sys
 import unicodedata
 
 NOTICE = "참고용 초안_신고용 아님"
+# 도구 판. 저장소 맨 위 VERSION 파일과 같아야 한다(시험으로 확인).
+TOOL_VERSION = "1.2"
+TOOL_STAMP = "도구 판 v" + TOOL_VERSION
 CHECK = "[확인 필요]"
 NUMBER_SLOT = "[확인 필요: 법제처 원문 확인 뒤에만]"
 CHECK_DATE = "2026-11-03"
@@ -1411,7 +1414,7 @@ def summarize(data):
 
 
 def build_summary_md(as_of_line, data, monthly, totals):
-    lines = [as_of_line, NOTICE, "", "# 내 회사 장부 초안 요약", ""]
+    lines = [as_of_line, NOTICE, TOOL_STAMP, "", "# 내 회사 장부 초안 요약", ""]
     lines.append("- 입력 줄: {}줄 / 장부에 옮긴 줄: {}줄 / 합계에 넣은 줄: {}줄".format(
         data["rows_total"], len(data["ledger_rows"]), len(data["included"])))
     lines += ["", "## 월별 손익·현금 흐름", "",
@@ -1503,13 +1506,13 @@ def cmd_calc(args):
     code = 10 if (data["needs_check"] or data["rrn_lines"]) else 0
     status = "ok_with_checks" if code == 10 else "ok"
 
-    ledger = [[NOTICE], LEDGER_COLUMNS] + data["ledger_rows"]
-    pnl = [[NOTICE], ["월", "들어온돈", "나간돈", "순손익"]]
+    ledger = [[NOTICE, TOOL_STAMP], LEDGER_COLUMNS] + data["ledger_rows"]
+    pnl = [[NOTICE, TOOL_STAMP], ["월", "들어온돈", "나간돈", "순손익"]]
     pnl += [[m["month"], m["in"], m["out"], m["net"]] for m in monthly]
     pnl.append(["합계", totals["in"], totals["out"], totals["net"]])
     pnl += [[], ["계정별 소계 (확정=사용자 확인, 제안=확인 전)"], ["월", "계정", "계정상태", "들어온돈", "나간돈"]]
     pnl += [[s["month"], s["account"], s["account_status"], s["in"], s["out"]] for s in subtotals]
-    cash = [[NOTICE], ["월", "들어온돈", "나간돈", "순현금흐름", "누적"]]
+    cash = [[NOTICE, TOOL_STAMP], ["월", "들어온돈", "나간돈", "순현금흐름", "누적"]]
     cash += [[m["month"], m["in"], m["out"], m["net"], m["cumulative"]] for m in monthly]
     cash.append(["합계", totals["in"], totals["out"], totals["net"], ""])
     cash.append(["누적은 0에서 시작했어요(시작 잔액은 넣지 않았어요)."])
@@ -1533,6 +1536,7 @@ def cmd_calc(args):
         "rrn_excluded_lines": data["rrn_lines"],
         "rrn_message": RRN_MSG if data["rrn_lines"] else "",
         "files": OUTPUT_FILES,
+        "tool_version": TOOL_VERSION,
     }
     contents = {
         LEDGER_FILE: csv_bytes(ledger),

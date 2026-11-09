@@ -26,6 +26,8 @@ from ledger_calc import (  # noqa: E402
     row_contains_rrn,
     build_nfkc_mapping,
     compose_answer,
+    TOOL_VERSION,
+    TOOL_STAMP,
 )
 
 PROG = os.path.join(ROOT, "ledger_calc.py")
@@ -419,7 +421,8 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(set(result), {
             "notice", "as_of", "status", "exit_code", "basis", "disclaimer", "program_sha256", "totals",
             "monthly", "account_subtotals", "rows_total", "rows_in_ledger", "rows_in_totals",
-            "no_evidence_ask_tax_advisor", "needs_check", "rrn_excluded_lines", "rrn_message", "files"})
+            "no_evidence_ask_tax_advisor", "needs_check", "rrn_excluded_lines", "rrn_message", "files",
+            "tool_version"})
 
         out_bad = os.path.join(self.tmp, "out_bad")
         code, stdout, tail = calc(BASIC, out_bad, "--expect-self-sha256", "0" * 64)
@@ -561,10 +564,11 @@ class LedgerTests(unittest.TestCase):
                 if name != "result.json":
                     self.assertTrue(name.startswith(NOTICE))
             for name in OUTPUT_FILES[:3]:
-                self.assertEqual(read_csv(os.path.join(out, name))[0], [NOTICE])
+                self.assertEqual(read_csv(os.path.join(out, name))[0], [NOTICE, TOOL_STAMP])
             lines = read(os.path.join(out, OUTPUT_FILES[3])).rstrip("\n").split("\n")
             self.assertEqual(lines[0], "기준일 2026-11-03" if out != out_c else "기준일 [확인 필요]")
             self.assertEqual(lines[1], NOTICE)
+            self.assertEqual(lines[2], TOOL_STAMP)
             self.assertEqual(lines[-1], DISCLAIMER)
             self.assertIn("현금 기준 단순 합계이며 결산 조정·세액 계산은 하지 않았어요", "\n".join(lines))
         for name in OUTPUT_FILES:
@@ -2398,6 +2402,14 @@ class LedgerTests(unittest.TestCase):
         self.assertIn("연결 안내를 붙이지 않는다", law_sec)
         self.assertIn("물을 때만", law_sec)
         self.assertIn("법령 조회 연결 안내", law_sec)
+        # v1.2: 연결은 처음 한 번만 묻는다(상수님 승인 2026-11-09). 묻지 않고 추가하지 않는다.
+        self.assertNotIn("하나로 추가하고, 먼저 권하지 않는다", law_sec)
+        self.assertIn("### 처음 한 번 묻기", law_sec)
+        self.assertIn("GetMcpServerStatus", law_sec)
+        self.assertIn("법령 조회 연결 물어봄:", law_sec)
+        self.assertIn("「예」면 `AddMcpServer`로 이름 `gomdori-law`, 주소 `https://mcp.gomdori.app/law` 하나만 추가한다", law_sec)
+        self.assertIn("주인이 아닌 사람의 「예」로는 연결하지 않는다", law_sec)
+        self.assertIn("「처음 한 번 묻기」 질문은 이 안내와 따로다", section)
 
     def test_65_intro_fixed_answer_omits_site_disclaimer(self):
         """소개·상담 고정 답에 사이트 미확인 문장이 무조건 붙어 있지 않음."""
@@ -2479,6 +2491,20 @@ class LedgerTests(unittest.TestCase):
             self.assertEqual(listed_skill, skill, name)
             self.assertEqual(file_hash, sha256_file(path), name)
             self.assertEqual(body_hash, _rule_body_sha256(read(path)), name)
+
+    def test_68_tool_version_stamp(self):
+        """결과 파일 모두에 「도구 판 vX.Y」가 찍히고, 판이 저장소 VERSION과 같다."""
+        self.assertEqual(TOOL_STAMP, "도구 판 v" + TOOL_VERSION)
+        version_file = os.path.join(os.path.dirname(ROOT), "VERSION")
+        if os.path.isfile(version_file):
+            self.assertEqual(read(version_file).strip(), TOOL_VERSION)
+        out = os.path.join(self.tmp, "stamp")
+        code, _, _ = calc(BASIC, out, "--as-of", "2026-11-03")
+        self.assertEqual(code, 0)
+        for name in OUTPUT_FILES:
+            self.assertIn(TOOL_STAMP if name != "result.json" else TOOL_VERSION, read(os.path.join(out, name)), name)
+        result = json.loads(read(os.path.join(out, "result.json")))
+        self.assertEqual(result["tool_version"], TOOL_VERSION)
 
     def _assert_marker_only_when_asked(self, text, marker, ask_only, label):
         start = 0
