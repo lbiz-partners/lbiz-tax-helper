@@ -2364,6 +2364,66 @@ class LedgerTests(unittest.TestCase):
             self._assert_marker_only_when_asked(rules_main, marker, ask_only, "tax-rules.md")
         self.assertIn("홈택스 화면을 봐야 하는 일일 때만", rules_start)
 
+    def test_64_law_lookup_notice_only_when_asked(self):
+        """법령 조회 연결 안내는 출처·확인 방법·연결을 물을 때만.
+
+        안내 문구 자체는 그대로 두고, 숫자를 처음 말하는 답에 자동으로 붙이지 않는다.
+        """
+        rules_dir, reason = helper_rules_dir()
+        if rules_dir is None:
+            self.skipTest(reason)
+        rules_main = read(os.path.join(rules_dir, "tax-rules.md"))
+        rules_start = read(os.path.join(rules_dir, "tax-start.md"))
+        guide = (
+            "「숫자는 법제처 원문을 먼저 열어 보고, 열리지 않으면 [확인 필요]로 둡니다. "
+            "이 도우미에는 기준표가 없습니다. 원문 확인을 늘리고 싶으시면 공개 법령 서버"
+            "(제3자 운영, 선택 사항) 연결을 요청하실 수 있습니다. "
+            "「법령 조회 연결해 줘」라고 말씀해 주시면 확인 질문 뒤에 제가 연결해 드립니다. "
+            "연결이 없어도 지금처럼 정상으로 작동합니다. "
+            "다만 이 연결로 확인한 조문은 법제처 직접 확인이 아니어서 보조로만 씁니다.」"
+        )
+        self.assertIn(guide, rules_start)
+        start = rules_start.index("## 법령 조회 연결 안내")
+        nxt = rules_start.find("\n## ", start + 3)
+        section = rules_start[start:nxt if nxt > 0 else None]
+        self.assertIn("물을 때만", section)
+        self.assertIn("묻지 않았으면 넣지 않는다", section)
+        self.assertIn("숫자를 처음 말하는 답이라고 해서 넣지 않는다", section)
+        self.assertNotIn("처음 말하는 답에는", section)
+
+        law_at = rules_main.index("## 공개 법령 서버 연결")
+        law_end = rules_main.find("\n## ", law_at + 3)
+        law_sec = rules_main[law_at:law_end if law_end > 0 else None]
+        self.assertNotIn("열지 못했을 때 연결을 요청하실 수 있다고 한 번만 알린다", law_sec)
+        self.assertIn("연결 안내를 붙이지 않는다", law_sec)
+        self.assertIn("물을 때만", law_sec)
+        self.assertIn("법령 조회 연결 안내", law_sec)
+
+    def test_65_intro_fixed_answer_omits_site_disclaimer(self):
+        """소개·상담 고정 답에 사이트 미확인 문장이 무조건 붙어 있지 않음."""
+        sentence = "그 사이트의 자세한 안내는 제가 확인하지 않았으니 직접 확인해 주세요."
+        rules_dir, reason = helper_rules_dir()
+        if rules_dir is None:
+            self.skipTest(reason)
+        rules_main = read(os.path.join(rules_dir, "tax-rules.md"))
+        rules_start = read(os.path.join(rules_dir, "tax-start.md"))
+        self.assertNotIn(sentence, rules_main)
+        self.assertNotIn(sentence, rules_start)
+        self.assertIn("이렇게만 답한다", rules_main)
+        self.assertIn("저는 전문가를 연결하거나 연락처를 넘겨 드리지 않습니다.", rules_main)
+        self.assertIn(
+            "그 밖의 연락처는 알려 드리지 않습니다. 문의는 엘비즈파트너스 홈페이지(https://lbiz-partners.com)에서 해 주세요.",
+            rules_main,
+        )
+
+    def test_66_screen_photo_term_is_capture(self):
+        """화면 사진은 『캡처』로 쓰고, 『캐프』 같은 줄임·오타는 금지."""
+        rules_dir, reason = helper_rules_dir()
+        if rules_dir is None:
+            self.skipTest(reason)
+        rules_main = read(os.path.join(rules_dir, "tax-rules.md"))
+        self.assertIn("화면 사진은 『캡처』로 쓴다(『캐프』 같은 줄임·오타 금지)", rules_main)
+
     def _assert_marker_only_when_asked(self, text, marker, ask_only, label):
         start = 0
         while True:
